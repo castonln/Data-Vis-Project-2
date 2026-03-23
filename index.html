@@ -1,23 +1,153 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>Interactive map with Leaflet</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cincinnati 311 Pothole Requests</title>
     <link rel="icon" href="data:;base64,iVBORwOKGO=" />
-    <link rel="stylesheet" href="css/leaflet.css">
-    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="https://unpkg.com/@knadh/oat/oat.min.css" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="css/leaflet.css" />
+    <link rel="stylesheet" href="css/style.css" />
 </head>
 <body>
-    <div id="my-map"></div>
-    
+    <main class="app-shell">
+        <header class="card hero-card">
+            <h1>Cincinnati 311 Pothole Requests</h1>
+            <p class="subtitle">Interactive map of pothole (PTHOLE) requests. Live data covers about 2004–2026; 2026 is partial (through March 21). Earliest years have very few records—compare from ~2005 onward for meaningful trends.</p>
+
+            <div class="dashboard-controls" aria-label="Visualization controls">
+                <section class="controls-block controls-map" aria-labelledby="controls-map-title">
+                    <h3 id="controls-map-title" class="controls-heading">Map</h3>
+                    <div class="controls-map-inner">
+                        <div class="field field-color">
+                            <label for="color-mode">Color points by</label>
+                            <select id="color-mode" aria-label="Color map points by category">
+                                <option value="daysToUpdate">Time to last update (days)</option>
+                                <option value="neighborhood">Neighborhood</option>
+                                <option value="priority">Priority</option>
+                                <option value="deptName">Department</option>
+                            </select>
+                        </div>
+                        <menu class="buttons map-action-buttons">
+                            <li><button id="map-mode-toggle" type="button">Heatmap</button></li>
+                            <li><button id="basemap-toggle" type="button" data-variant="secondary">OpenCycleMap</button></li>
+                        </menu>
+                    </div>
+                </section>
+
+                <section class="controls-block controls-scope" aria-labelledby="controls-scope-title">
+                    <div class="controls-scope-head">
+                        <div>
+                            <h3 id="controls-scope-title" class="controls-heading">Data scope</h3>
+                        </div>
+                        <button id="clear-filters" type="button" data-variant="secondary" class="outline small clear-scope-btn">Clear scope</button>
+                    </div>
+                    <div class="scope-fields">
+                        <div class="field">
+                            <label for="filter-dept">Department</label>
+                            <select id="filter-dept" aria-label="Filter by department">
+                                <option value="">All</option>
+                            </select>
+                        </div>
+                        <div class="field field-neighborhood">
+                            <label for="filter-neighborhood">Neighborhood</label>
+                            <select id="filter-neighborhood" aria-label="Add a neighborhood to filter">
+                                <option value="">Add neighborhood…</option>
+                            </select>
+                        </div>
+                        <div class="field">
+                            <label for="filter-priority">Priority</label>
+                            <select id="filter-priority" aria-label="Filter by priority">
+                                <option value="">All</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div id="filter-chips" class="filter-chips" role="group" aria-label="Active scope filters" hidden></div>
+                </section>
+            </div>
+        </header>
+
+        <section class="card timeline-card">
+            <div class="timeline-header">
+                <h2>Requests over time</h2>
+                <div class="timeline-toolbar">
+                    <div class="field field-timeline-year">
+                        <label for="timeline-year">Timeline focus</label>
+                        <select id="timeline-year" aria-label="Timeline year or all years">
+                            <option value="">All years (monthly bins)</option>
+                        </select>
+                    </div>
+                    <menu class="buttons timeline-actions">
+                        <li><button id="clear-brush" type="button" data-variant="secondary" class="outline">Reset date filter</button></li>
+                    </menu>
+                </div>
+            </div>
+            <div id="timeline-chart"></div>
+            <p id="timeline-help">All years: monthly counts. Choosing a year switches to weekly counts and filters the map and charts to that year. Drag on the chart to narrow the date range further. Compare full calendar years only; label partial years (e.g. 2026) accordingly.</p>
+        </section>
+
+        <section class="dashboard-grid">
+            <article class="card map-card">
+                <div id="my-map" aria-label="Pothole service request map"></div>
+            </article>
+
+            <aside class="card side-card">
+                <section>
+                    <h2>Legend</h2>
+                    <div id="legend"></div>
+                </section>
+
+                <section class="status-section">
+                    <h2>Data Status</h2>
+                    <p><strong>Source:</strong> <span id="data-source">Loading...</span></p>
+                    <p><strong>Requests in filter:</strong> <span id="count-total">-</span></p>
+                    <p><strong>Mapped in filter:</strong> <span id="count-mapped">-</span></p>
+                    <p><strong>Missing coords in filter:</strong> <span id="count-unmapped">-</span></p>
+                    <p><strong>Total loaded:</strong> <span id="count-total-year">-</span></p>
+                    <p id="partial-year-note" class="status-partial-note" hidden><strong>Note:</strong> 2026 data is partial (through March 21). Year-over-year comparisons should treat 2026 separately.</p>
+                    <p><strong>Active basemap:</strong> <span id="basemap-label">Street</span></p>
+                    <p><strong>Active map mode:</strong> <span id="map-mode-label">Points</span></p>
+                    <p><strong>Active date range:</strong> <span id="active-range">All dates</span></p>
+                    <p><strong>Attribute filters:</strong> <span id="active-filters">None</span></p>
+                </section>
+
+                <div id="data-warning" role="alert" hidden></div>
+
+                <section>
+                    <h2>Common Methods</h2>
+                    <div id="methods-chart" class="mini-chart"></div>
+                </section>
+
+                <section>
+                    <h2>Most Responsible Departments</h2>
+                    <div id="depts-chart" class="mini-chart"></div>
+                </section>
+
+                <section>
+                    <h2>Priority Levels</h2>
+                    <div id="priority-chart" class="mini-chart"></div>
+                </section>
+            </aside>
+        </section>
+    </main>
+
+    <div id="tooltip" role="tooltip"></div>
+    <div id="timeline-tooltip" class="timeline-tooltip" role="tooltip" hidden></div>
+
+    <script>
+      window.APP_CONFIG = window.APP_CONFIG || {};
+    </script>
+
+    <script src="https://unpkg.com/@knadh/oat/oat.min.js"></script>
     <script src="js/d3.v6.min.js"></script>
     <script src="js/leaflet.js"></script>
-
-
-    <script src="js/main.js"></script>
+    <script src="js/leaflet-heat.js"></script>
+    <script src="js/config.local.js"></script>
     <script src="js/leafletMap.js"></script>
-
-    <div id="tooltip"></div>
-
+    <script src="js/main.js"></script>
 
 </body>
 </html>
