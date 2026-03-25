@@ -19,6 +19,8 @@ const TARGET_SERVICE_TYPE = "PTHOLE";
 // Pothole (PTHOLE) requests: API coverage ~2004–2026 (2026 partial).
 const DATE_RANGE_START = "2004-01-01T00:00:00.000";
 const DATE_RANGE_END = "2026-12-31T23:59:59.999";
+/** Socrata SODA defaults to 1,000 rows per request; without paging you only get recent rows (e.g. one year). */
+const SOCRATA_CSV_PAGE_LIMIT = 50000;
 
 const SELECT_FIELDS = [
   "sr_number",
@@ -110,8 +112,8 @@ function setDataLoadProgress(message) {
 }
 
 /**
- * One CSV export is far faster and more reliable than paginated JSON (~20 requests for ~93k rows).
- * Same SoQL filter; rows match normalizeRecord() expectations.
+ * CSV export is faster than paginated JSON. Socrata caps each response (default 1,000 rows), so we
+ * page with $limit/$offset and stable $order. Same SoQL filter; rows match normalizeRecord().
  */
 async function requestSocrataCsv(url) {
   const headers = {};
@@ -171,12 +173,29 @@ async function requestSocrataCsv(url) {
 async function fetchAllSocrataRecords() {
   omitSocrataAppToken = false;
   const whereClause = `sr_type='${TARGET_SERVICE_TYPE}' AND date_created between '${DATE_RANGE_START}' and '${DATE_RANGE_END}'`;
-  const params = new URLSearchParams({
-    $select: SELECT_FIELDS.join(","),
-    $where: whereClause
-  });
-  const url = `https://${SOCRATA_DOMAIN}/resource/${DATASET_ID}.csv?${params.toString()}`;
-  return requestSocrataCsv(url);
+  const allRows = [];
+  let offset = 0;
+  const maxPages = 50;
+
+  for (let p = 0; p < maxPages; p++) {
+    const params = new URLSearchParams({
+      $select: SELECT_FIELDS.join(","),
+      $where: whereClause,
+      $order: ":id",
+      $limit: String(SOCRATA_CSV_PAGE_LIMIT),
+      $offset: String(offset)
+    });
+    const url = `https://${SOCRATA_DOMAIN}/resource/${DATASET_ID}.csv?${params.toString()}`;
+    const rows = await requestSocrataCsv(url);
+    allRows.push(...rows);
+    setDataLoadProgress(`Loading from API… ${formatCount(allRows.length)} rows`);
+    if (rows.length === 0 || rows.length < SOCRATA_CSV_PAGE_LIMIT) {
+      break;
+    }
+    offset += SOCRATA_CSV_PAGE_LIMIT;
+  }
+
+  return allRows;
 }
 
 function isPotholeFromCsv(record) {
