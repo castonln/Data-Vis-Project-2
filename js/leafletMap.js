@@ -148,7 +148,6 @@ class LeafletMap {
     `;
   }
 
-  /** Oat CSS vars --seq-light / --seq-dark; fallback if unavailable */
   getSequentialEndpoints() {
     const rs = typeof getComputedStyle === "undefined"
       ? null
@@ -161,9 +160,6 @@ class LeafletMap {
     };
   }
 
-  /**
-   * Highly separated hues for nominal neighborhood data (ColorBrewer Set3–style).
-   */
   getNeighborhoodPalette(categoryCount) {
     const palette = [
       "#8dd3c7", "#ffffb3", "#bebada", "#fb8072", "#80b1d3", "#fdb462", "#b3de69",
@@ -183,7 +179,6 @@ class LeafletMap {
     );
   }
 
-  /** Smaller categorical sets (e.g. department): strong but fewer hues */
   getOrdinalPalette(categoryCount) {
     const seedColors = [
       "#2563eb",
@@ -345,9 +340,6 @@ class LeafletMap {
   updateHeatLayer() {
     if (!this.heatLayer) return;
     const n = this.mappedData.length;
-    // Leaflet.heat caps each grid cell at `max`. With max=1, sparse samples still show
-    // gradients, but thousands of API points saturate every cell to the same intensity and
-    // the map looks blank or like a flat wash. Scale max with dataset size.
     const heatMax = n === 0 ? 1 : Math.max(4, Math.min(280, Math.ceil(n / 40)));
     this.heatLayer.setOptions({ max: heatMax });
     const HEAT_CAP = 28000;
@@ -573,7 +565,6 @@ class LeafletMap {
       if (this.activeMapMode === "heat") {
         this.heatLayer.addTo(this.theMap);
         this.updateHeatLayer();
-        // Redraw once after add in case redraw() was skipped while map was animating.
         requestAnimationFrame(() => {
           if (this.heatLayer && this.heatLayer._map && typeof this.heatLayer._reset === "function") {
             this.heatLayer._reset();
