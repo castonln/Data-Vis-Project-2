@@ -1,11 +1,22 @@
 const APP_CONFIG = window.APP_CONFIG || {};
 const SOCRATA_DOMAIN = APP_CONFIG.SOCRATA_DOMAIN || "data.cincinnati-oh.gov";
-const SOCRATA_APP_TOKEN = APP_CONFIG.SOCRATA_APP_TOKEN || "";
+
+// Empty or example placeholders must not be sent — Socrata returns 403 for invalid tokens.
+function usableSocrataAppToken(raw) {
+  const t = raw == null ? "" : String(raw).trim();
+  if (!t) return "";
+  if (/^REPLACE/i.test(t)) return "";
+  return t;
+}
+
+const SOCRATA_APP_TOKEN = usableSocrataAppToken(APP_CONFIG.SOCRATA_APP_TOKEN);
+
+//Set true after a 403 "invalid app_token" so we paginate without the bad header.
+let omitSocrataAppToken = false;
 
 const DATASET_ID = "gcej-gmiw";
-const PAGE_SIZE = 5000;
 const TARGET_SERVICE_TYPE = "PTHOLE";
-/** Pothole (PTHOLE) requests: API coverage ~2004–2026 (2026 partial). */
+// Pothole (PTHOLE) requests: API coverage ~2004–2026 (2026 partial).
 const DATE_RANGE_START = "2004-01-01T00:00:00.000";
 const DATE_RANGE_END = "2026-12-31T23:59:59.999";
 
@@ -98,33 +109,39 @@ function setDataLoadProgress(message) {
   if (el) el.textContent = message;
 }
 
-async function fetchSocrataPage(offset) {
-  const whereClause = `sr_type='${TARGET_SERVICE_TYPE}' AND date_created between '${DATE_RANGE_START}' and '${DATE_RANGE_END}'`;
-  const params = new URLSearchParams({
-    $select: SELECT_FIELDS.join(","),
-    $where: whereClause,
-    $order: "date_created ASC",
-    $limit: String(PAGE_SIZE),
-    $offset: String(offset)
-  });
-
-  const url = `https://${SOCRATA_DOMAIN}/resource/${DATASET_ID}.json?${params.toString()}`;
+/**
+ * One CSV export is far faster and more reliable than paginated JSON (~20 requests for ~93k rows).
+ * Same SoQL filter; rows match normalizeRecord() expectations.
+ */
+async function requestSocrataCsv(url) {
   const headers = {};
-
-  if (SOCRATA_APP_TOKEN) {
+  if (SOCRATA_APP_TOKEN && !omitSocrataAppToken) {
     headers["X-App-Token"] = SOCRATA_APP_TOKEN;
   }
 
+  setDataLoadProgress("Loading from API…");
   const response = await fetch(url, { headers });
-  let data;
-  try {
-    data = await response.json();
-  } catch {
-    throw new Error(`Socrata returned invalid JSON (HTTP ${response.status}).`);
-  }
+  const text = await response.text();
 
   if (!response.ok) {
-    const portalMsg = data && typeof data === "object" && data.message ? String(data.message) : "";
+    let portalMsg = "";
+    try {
+      const err = JSON.parse(text);
+      if (err && typeof err === "object" && err.message) {
+        portalMsg = String(err.message);
+      }
+    } catch {
+      /* error bodies are usually JSON; plain text is fine */
+    }
+    if (
+      response.status === 403 &&
+      SOCRATA_APP_TOKEN &&
+      !omitSocrataAppToken &&
+      /invalid app_token/i.test(portalMsg)
+    ) {
+      omitSocrataAppToken = true;
+      return requestSocrataCsv(url);
+    }
     if (response.status === 429) {
       const retry = response.headers.get("Retry-After");
       const extra = retry ? ` Retry after ${retry}s.` : "";
@@ -135,34 +152,31 @@ async function fetchSocrataPage(offset) {
     );
   }
 
-  if (!Array.isArray(data)) {
-    const msg =
-      data && typeof data === "object" && (data.message || data.error)
-        ? String(data.message || data.error)
-        : "response was not a row list";
-    throw new Error(`Socrata query failed: ${msg}`);
+  let rows;
+  try {
+    rows = d3.csvParse(text);
+  } catch (parseErr) {
+    const hint = parseErr instanceof Error ? parseErr.message : String(parseErr);
+    throw new Error(`Socrata returned CSV that could not be parsed: ${hint}`);
   }
 
-  return data;
+  if (!Array.isArray(rows)) {
+    throw new Error("Socrata CSV parse did not return rows.");
+  }
+
+  setDataLoadProgress(`Loading from API… ${formatCount(rows.length)} rows`);
+  return rows;
 }
 
 async function fetchAllSocrataRecords() {
-  const records = [];
-  let offset = 0;
-
-  while (true) {
-    setDataLoadProgress(`Loading from API… ${formatCount(records.length)} rows fetched (paginating)`);
-    const batch = await fetchSocrataPage(offset);
-    records.push(...batch);
-
-    if (batch.length < PAGE_SIZE) {
-      break;
-    }
-
-    offset += PAGE_SIZE;
-  }
-
-  return records;
+  omitSocrataAppToken = false;
+  const whereClause = `sr_type='${TARGET_SERVICE_TYPE}' AND date_created between '${DATE_RANGE_START}' and '${DATE_RANGE_END}'`;
+  const params = new URLSearchParams({
+    $select: SELECT_FIELDS.join(","),
+    $where: whereClause
+  });
+  const url = `https://${SOCRATA_DOMAIN}/resource/${DATASET_ID}.csv?${params.toString()}`;
+  return requestSocrataCsv(url);
 }
 
 function isPotholeFromCsv(record) {
