@@ -1,5 +1,3 @@
-"use strict";
-
 const APP_CONFIG = window.APP_CONFIG || {};
 const SOCRATA_DOMAIN = APP_CONFIG.SOCRATA_DOMAIN || "data.cincinnati-oh.gov";
 
@@ -33,7 +31,6 @@ const SELECT_FIELDS = [
   "longitude"
 ];
 
-// ─── App state ────────────────────────────────────────────────────────────────
 
 let leafletMapInstance = null;
 let allRecords         = [];
@@ -43,7 +40,7 @@ let activeBrushRange   = null;
 let filterDepartment     = "";
 let filterNeighborhoods  = [];
 let filterPriority       = "";
-let filterMethodReceived = "";   // ← Level 3 method filter
+let filterMethodReceived = "";
 
 let dataSourceLabel   = "Unknown";
 let dataWarningMessage = "";
@@ -56,7 +53,6 @@ const timelineState = {
   bin: "month"
 };
 
-// ─── Data helpers ─────────────────────────────────────────────────────────────
 
 function getValue(record, aliases) {
   for (const key of aliases) {
@@ -108,7 +104,6 @@ function normalizeAll(records) {
   return records.map(normalizeRecord);
 }
 
-// ─── Data loading ─────────────────────────────────────────────────────────────
 
 function setDataLoadProgress(message) {
   const el = document.getElementById("data-source");
@@ -130,7 +125,7 @@ async function requestSocrataCsv(url) {
     try {
       const err = JSON.parse(text);
       if (err && typeof err === "object" && err.message) portalMsg = String(err.message);
-    } catch { /* plain text is fine */ }
+    } catch { }
 
     if (
       response.status === 403 &&
@@ -232,7 +227,6 @@ async function loadRecords() {
   }
 }
 
-// ─── Formatters ───────────────────────────────────────────────────────────────
 
 function formatCount(value) {
   return d3.format(",")(value);
@@ -255,7 +249,6 @@ function uniqueSortedStrings(values) {
   ].sort((a, b) => d3.ascending(a.toLowerCase(), b.toLowerCase()));
 }
 
-// ─── Filter chips & dropdowns ────────────────────────────────────────────────
 
 function populateNeighborhoodDropdown() {
   const el = document.getElementById("filter-neighborhood");
@@ -362,7 +355,6 @@ function populateFilterSelects() {
   );
 }
 
-// ─── Status panel ─────────────────────────────────────────────────────────────
 
 function updateStatusPanel() {
   const mappedFiltered   = filteredRecords.filter(d => d.latitude !== null && d.longitude !== null).length;
@@ -408,12 +400,10 @@ function updateStatusPanel() {
     }
   }
 
-  // Level 3 record-count badge
   const countBadge = document.getElementById("l3-record-count");
   if (countBadge) countBadge.textContent = formatCount(filteredRecords.length);
 }
 
-// ─── Mini summary charts (sidebar) ───────────────────────────────────────────
 
 function renderCategoryChart(containerId, records, accessor, limit) {
   const container = d3.select(containerId);
@@ -446,7 +436,6 @@ function updateSummaryCharts() {
   renderCategoryChart("#priority-chart",filteredRecords, d => d.priority,       null);
 }
 
-// ─── Timeline ─────────────────────────────────────────────────────────────────
 
 const PTHOLE_MIN_YEAR = 2004;
 
@@ -696,12 +685,10 @@ function renderTimeline(records) {
   timelineState.xScale     = xScale;
 }
 
-// ─── Core filter pipeline ─────────────────────────────────────────────────────
 
 function applyFilters() {
   let next = allRecords.slice();
 
-  // Timeline year scope
   const timelineYearEl = document.getElementById("timeline-year");
   const timelineYear   = timelineYearEl && timelineYearEl.value
     ? timelineYearEl.value.trim() : "";
@@ -710,7 +697,6 @@ function applyFilters() {
     next = next.filter(r => r.dateCreated && r.dateCreated.getFullYear() === y);
   }
 
-  // Brush date range
   if (activeBrushRange) {
     next = next.filter(r => {
       if (!r.dateCreated) return false;
@@ -718,7 +704,6 @@ function applyFilters() {
     });
   }
 
-  // Attribute filters
   if (filterDepartment)        next = next.filter(r => r.deptName       === filterDepartment);
   if (filterNeighborhoods.length > 0) {
     const nh = new Set(filterNeighborhoods);
@@ -729,14 +714,11 @@ function applyFilters() {
 
   filteredRecords = next;
 
-  // Push to map
   if (leafletMapInstance) leafletMapInstance.setFilteredData(filteredRecords);
 
-  // Update all views
   updateSummaryCharts();
   updateStatusPanel();
 
-  // Level 3 dedicated charts
   if (typeof window.updateLevel3Charts === "function") {
     window.updateLevel3Charts(filteredRecords, {
       neighborhood: filterNeighborhoods[0] || "",
@@ -747,10 +729,8 @@ function applyFilters() {
   }
 }
 
-// ─── Level 3 click-to-filter hook ────────────────────────────────────────────
 
 window.onLevel3Filter = function (field, value) {
-  // Toggle: clicking an already-active value clears it
   if (field === "neighborhood") {
     const idx = filterNeighborhoods.indexOf(value);
     if (idx === -1) {
@@ -780,7 +760,6 @@ window.onLevel3Filter = function (field, value) {
   applyFilters();
 };
 
-// ─── UI event wiring ──────────────────────────────────────────────────────────
 
 function wireUiEvents() {
   const colorModeSelect      = document.getElementById("color-mode");
@@ -908,7 +887,6 @@ function wireUiEvents() {
   }
 }
 
-// ─── App bootstrap ────────────────────────────────────────────────────────────
 
 async function initializeApp() {
   setDataLoadProgress("Connecting to API…");
@@ -945,7 +923,6 @@ async function initializeApp() {
   updateStatusPanel();
   wireUiEvents();
 
-  // Sync basemap button label
   const basemapLabel = document.getElementById("basemap-label");
   const basemapBtn   = document.getElementById("basemap-toggle");
   if (leafletMapInstance && basemapLabel && basemapBtn) {
@@ -954,7 +931,6 @@ async function initializeApp() {
     basemapBtn.textContent   = street ? "OpenCycleMap" : "Street map";
   }
 
-  // Initial Level 3 render
   if (typeof window.updateLevel3Charts === "function") {
     window.updateLevel3Charts(filteredRecords, {});
   }

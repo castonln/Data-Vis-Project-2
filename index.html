@@ -11,169 +11,10 @@
     <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="css/leaflet.css" />
     <link rel="stylesheet" href="css/style.css" />
-
-    <style>
-        /* ── CSS custom properties ─────────────────────────────────────────── */
-        :root {
-            --chart-grid:         #e2e8f0;
-            --chart-axis-text:    #64748b;
-            --chart-label-color:  #64748b;
-            --chart-center-text:  #1e293b;
-            --chart-donut-stroke: #ffffff;
-            --card-bg:            #ffffff;
-            --card-border:        #e2e8f0;
-            --card-radius:        10px;
-            --l3-gap:             1.25rem;
-        }
-
-        /* ── Level 3 section wrapper ───────────────────────────────────────── */
-        .l3-section {
-            margin-top: 1.75rem;
-        }
-
-        .l3-section-header {
-            display: flex;
-            align-items: baseline;
-            gap: 0.75rem;
-            flex-wrap: wrap;
-            margin-bottom: 1rem;
-        }
-
-        .l3-section-header h2 {
-            font-size: 1.15rem;
-            font-weight: 700;
-            color: #1e293b;
-            margin: 0;
-        }
-
-        .l3-section-subtitle {
-            font-size: 0.8rem;
-            color: #94a3b8;
-            margin: 0;
-        }
-
-        /* ── Grid layout ───────────────────────────────────────────────────── */
-        /*
-         * Wide (≥ 900 px):
-         *   Row 1 — neighborhood chart spans full width
-         *   Row 2 — method donut | dept bar
-         *   Row 3 — priority donut | (empty)
-         *
-         * Narrow: all cards stack vertically.
-         */
-        .l3-grid {
-            display: grid;
-            gap: var(--l3-gap);
-            grid-template-columns: 1fr 1fr;
-            grid-template-areas:
-                "neighborhood neighborhood"
-                "method       dept"
-                "priority     .";
-        }
-
-        @media (max-width: 860px) {
-            .l3-grid {
-                grid-template-columns: 1fr;
-                grid-template-areas:
-                    "neighborhood"
-                    "method"
-                    "dept"
-                    "priority";
-            }
-        }
-
-        .l3-card-neighborhood { grid-area: neighborhood; }
-        .l3-card-method        { grid-area: method; }
-        .l3-card-dept          { grid-area: dept; }
-        .l3-card-priority      { grid-area: priority; }
-
-        /* ── Card shell ────────────────────────────────────────────────────── */
-        .l3-card {
-            background:    var(--card-bg);
-            border:        1px solid var(--card-border);
-            border-radius: var(--card-radius);
-            padding:       1rem 1.25rem 0.75rem;
-            box-shadow:    0 1px 3px rgba(0,0,0,.06);
-            overflow:      hidden;
-            transition:    border-color 0.2s, box-shadow 0.2s;
-        }
-
-        /* Visual cue when this card's field is the active filter */
-        .l3-card.is-filtered {
-            border-color: #4e79a7;
-            box-shadow:   0 0 0 2px rgba(78,121,167,.22), 0 1px 3px rgba(0,0,0,.06);
-        }
-
-        .l3-card-header {
-            display:     flex;
-            align-items: baseline;
-            gap:         0.6rem;
-            flex-wrap:   wrap;
-            margin-bottom: 0.5rem;
-        }
-
-        .l3-card-title {
-            font-size:   0.92rem;
-            font-weight: 600;
-            color:       #1e293b;
-            margin:      0;
-        }
-
-        .l3-card-hint {
-            font-size:  0.73rem;
-            color:      #94a3b8;
-            font-style: italic;
-        }
-
-        /* ── Chart area ────────────────────────────────────────────────────── */
-        .l3-chart-area {
-            width:      100%;
-            min-height: 60px;
-            overflow:   hidden;
-        }
-
-        /* ── D3 chart elements ─────────────────────────────────────────────── */
-        .chart-bar {
-            transition: opacity 0.12s;
-        }
-
-        .chart-count-label {
-            pointer-events: none;
-            user-select:    none;
-        }
-
-        .chart-empty-msg {
-            padding:    2rem 0;
-            text-align: center;
-            color:      #94a3b8;
-            font-size:  0.875rem;
-        }
-
-        /* ── Shared Level-3 tooltip ────────────────────────────────────────── */
-        .chart-tooltip {
-            position:       fixed;
-            z-index:        9999;
-            background:     rgba(15, 23, 42, 0.92);
-            color:          #f8fafc;
-            font-size:      12.5px;
-            line-height:    1.5;
-            padding:        7px 11px;
-            border-radius:  6px;
-            pointer-events: none;
-            max-width:      220px;
-            box-shadow:     0 4px 12px rgba(0,0,0,.25);
-        }
-
-        .chart-tooltip strong {
-            display:       block;
-            margin-bottom: 2px;
-        }
-    </style>
 </head>
 <body>
     <main class="app-shell">
 
-        <!-- ── Hero / controls ────────────────────────────────────────────── -->
         <header class="card hero-card">
             <h1>Cincinnati 311 Pothole Requests</h1>
             <p class="subtitle">
@@ -245,7 +86,6 @@
             </div>
         </header>
 
-        <!-- ── Timeline ───────────────────────────────────────────────────── -->
         <section class="card timeline-card">
             <div class="timeline-header">
                 <h2>Requests over time</h2>
@@ -274,7 +114,6 @@
             </p>
         </section>
 
-        <!-- ── Map + sidebar ──────────────────────────────────────────────── -->
         <section class="dashboard-grid">
             <article class="card map-card">
                 <div id="my-map" aria-label="Pothole service request map"></div>
@@ -331,76 +170,56 @@
             </aside>
         </section>
 
-        <!-- ══════════════════════════════════════════════════════════════════
-             LEVEL 3 — Attribute views
-             Four dedicated charts below the map panel.
-             ══════════════════════════════════════════════════════════════════ -->
-        <section class="l3-section" aria-label="Attribute views">
 
-            <div class="l3-section-header">
-                <h2>Attribute Views</h2>
-                <p class="l3-section-subtitle">
-                    Click any bar or slice to add it as a filter.
-                    Showing <strong id="l3-record-count">–</strong> requests.
-                </p>
+        <p class="text-light mt-6 mb-4">
+            Attribute Views
+        </p>
+
+        <div class="row">
+
+            <div class="col-12">
+                <section class="card" id="card-neighborhood">
+                    <div class="timeline-header">
+                        <h2>Top Neighborhoods by Requests</h2>
+                    </div>
+                    <div id="neighborhood-chart"></div>
+                </section>
             </div>
 
-            <div class="l3-grid">
-
-                <!-- 1 · Neighborhoods ─────────────────────────────────────── -->
-                <div class="l3-card l3-card-neighborhood" id="card-neighborhood">
-                    <div class="l3-card-header">
-                        <h3 class="l3-card-title">Top Neighborhoods by Requests</h3>
-                        <span class="l3-card-hint">
-                            Sequential blue — darker = more requests (quantitative)
-                        </span>
+            <div class="col-6">
+                <section class="card" id="card-method">
+                    <div class="timeline-header">
+                        <h2>Method Received</h2>
                     </div>
-                    <div id="neighborhood-chart" class="l3-chart-area"></div>
-                </div>
+                    <div id="method-chart"></div>
+                </section>
+            </div>
 
-                <!-- 2 · Method Received ───────────────────────────────────── -->
-                <div class="l3-card l3-card-method" id="card-method">
-                    <div class="l3-card-header">
-                        <h3 class="l3-card-title">Method Received</h3>
-                        <span class="l3-card-hint">
-                            Categorical palette — nominal data, no implied order
-                        </span>
+            <div class="col-6">
+                <section class="card" id="card-dept">
+                    <div class="timeline-header">
+                        <h2>Responsible Department</h2>
                     </div>
-                    <div id="method-chart" class="l3-chart-area"></div>
-                </div>
+                    <div id="dept-chart"></div>
+                </section>
+            </div>
 
-                <!-- 3 · Department ────────────────────────────────────────── -->
-                <div class="l3-card l3-card-dept" id="card-dept">
-                    <div class="l3-card-header">
-                        <h3 class="l3-card-title">Responsible Department</h3>
-                        <span class="l3-card-hint">
-                            Categorical palette — nominal data
-                        </span>
+            <div class="col-6">
+                <section class="card" id="card-priority-l3">
+                    <div class="timeline-header">
+                        <h2>Priority Level</h2>
                     </div>
-                    <div id="dept-chart" class="l3-chart-area"></div>
-                </div>
+                    <div id="priority-chart-l3"></div>
+                </section>
+            </div>
 
-                <!-- 4 · Priority ──────────────────────────────────────────── -->
-                <div class="l3-card l3-card-priority" id="card-priority-l3">
-                    <div class="l3-card-header">
-                        <h3 class="l3-card-title">Priority Level</h3>
-                        <span class="l3-card-hint">
-                            Semantic color: amber = high urgency — categorical, ordered
-                        </span>
-                    </div>
-                    <div id="priority-chart-l3" class="l3-chart-area"></div>
-                </div>
-
-            </div><!-- /.l3-grid -->
-        </section>
+        </div>
 
     </main>
 
-    <!-- ── Global tooltips ──────────────────────────────────────────────── -->
     <div id="tooltip"          role="tooltip"></div>
     <div id="timeline-tooltip" class="timeline-tooltip" role="tooltip" hidden></div>
 
-    <!-- ── Scripts ──────────────────────────────────────────────────────── -->
     <script>
         window.APP_CONFIG = window.APP_CONFIG || {};
     </script>
@@ -411,7 +230,7 @@
     <script src="js/leaflet-heat.js"></script>
     <script src="js/config.local.js"></script>
     <script src="js/leafletMap.js"></script>
-    <script src="js/level3Charts.js"></script>  <!-- must load before main.js -->
+    <script src="js/level3Charts.js"></script>
     <script src="js/main.js"></script>
 
 </body>

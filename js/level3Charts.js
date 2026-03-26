@@ -4,22 +4,19 @@ const CATEGORICAL_COLORS = [
   "#bab0ac", "#499894"
 ];
 
-/** Priority semantic mapping. */
 const PRIORITY_COLORS = {
-  "HAZARDOUS":     "#d97706",   // amber — urgency
-  "PRIORITY":   "#4e79a7",   // steel-blue — neutral
-  "STANDARD":      "#94a3b8",   // slate — de-emphasised
+  "HAZARDOUS":     "#d97706",
+  "PRIORITY":   "#4e79a7",
+  "STANDARD":      "#94a3b8",
   "Unknown":  "#cbd5e1"
 };
 
-/** Sequential blue ramp for neighborhood bars (quantitative magnitude). */
 const NEIGHBORHOOD_COLOR_SCALE = d3.scaleSequential(d3.interpolateBlues);
 
 function formatCount(v) {
   return d3.format(",")(v);
 }
 
-/** Roll up records by a string accessor, return sorted [label, count] pairs. */
 function rollupByField(records, accessor, limit) {
   const counts = d3.rollups(
     records,
@@ -29,18 +26,12 @@ function rollupByField(records, accessor, limit) {
   return typeof limit === "number" ? counts.slice(0, limit) : counts;
 }
 
-/**
- * Emit a filter event to the host application.
- * In main.js, assign `window.onLevel3Filter = (field, value) => { … }`.
- * If the same value is already active, pass null to clear the filter.
- */
 function emitFilter(field, value) {
   if (typeof window.onLevel3Filter === "function") {
     window.onLevel3Filter(field, value);
   }
 }
 
-/** Render an "empty-state" message inside a container. */
 function showEmpty(containerSel, msg) {
   containerSel.html("");
   containerSel.append("p")
@@ -48,7 +39,6 @@ function showEmpty(containerSel, msg) {
     .text(msg || "No data for current filter.");
 }
 
-// ─── 1. Neighborhood Chart ─── horizontal bar, top 20 ─────────────────────────
 
 /**
  * @param {Object[]} records  – normalised 311 records
@@ -66,10 +56,8 @@ function renderNeighborhoodChart(records, activeValue) {
 
   const maxCount = rows[0][1] || 1;
 
-  // Color scale: interpolate blues domain [0, max]
   NEIGHBORHOOD_COLOR_SCALE.domain([0, maxCount]);
 
-  // Dynamic height — allow each label to have adequate vertical space
   const ROW_HEIGHT = 26;
   const margin = { top: 10, right: 64, bottom: 36, left: 148 };
   const width  = Math.max(400, (container.node().clientWidth || 520));
@@ -87,7 +75,6 @@ function renderNeighborhoodChart(records, activeValue) {
   const g = svg.append("g")
     .attr("transform", `translate(${margin.left},${margin.top})`);
 
-  // Scales
   const xScale = d3.scaleLinear()
     .domain([0, maxCount])
     .range([0, innerW])
@@ -98,7 +85,6 @@ function renderNeighborhoodChart(records, activeValue) {
     .range([0, innerH])
     .padding(0.18);
 
-  // Grid lines
   g.append("g").attr("class", "grid-lines")
     .selectAll("line")
     .data(xScale.ticks(5))
@@ -110,7 +96,6 @@ function renderNeighborhoodChart(records, activeValue) {
       .attr("stroke", "var(--chart-grid, #e2e8f0)")
       .attr("stroke-width", 1);
 
-  // Bars
   g.selectAll(".nb-bar")
     .data(rows)
     .join("rect")
@@ -121,7 +106,7 @@ function renderNeighborhoodChart(records, activeValue) {
       .attr("width", d => xScale(d[1]))
       .attr("fill", d =>
         activeValue && d[0] === activeValue
-          ? "#f28e2b"                           // highlight selected
+          ? "#f28e2b"
           : NEIGHBORHOOD_COLOR_SCALE(d[1])
       )
       .attr("rx", 3)
@@ -141,7 +126,6 @@ function renderNeighborhoodChart(records, activeValue) {
         hideChartTooltip();
       });
 
-  // Count labels at bar end
   g.selectAll(".nb-label")
     .data(rows)
     .join("text")
@@ -153,7 +137,6 @@ function renderNeighborhoodChart(records, activeValue) {
       .attr("fill", "var(--chart-label-color, #64748b)")
       .text(d => formatCount(d[1]));
 
-  // Y axis (neighborhood names)
   g.append("g")
     .attr("class", "axis y-axis")
     .call(
@@ -168,7 +151,6 @@ function renderNeighborhoodChart(records, activeValue) {
       .style("cursor", "pointer")
       .on("click", (_event, d) => emitFilter("neighborhood", d));
 
-  // X axis
   g.append("g")
     .attr("class", "axis x-axis")
     .attr("transform", `translate(0,${innerH})`)
@@ -178,7 +160,6 @@ function renderNeighborhoodChart(records, activeValue) {
       .attr("font-size", 11)
       .attr("fill", "var(--chart-axis-text, #64748b)");
 
-  // X axis label
   svg.append("text")
     .attr("x", margin.left + innerW / 2)
     .attr("y", height - 4)
@@ -198,7 +179,6 @@ function renderNeighborhoodChart(records, activeValue) {
   }
 }
 
-// ─── 2. Method Received Chart ─── donut ────────────────────────────────────────
 
 /**
  * @param {Object[]} records
@@ -222,7 +202,6 @@ function renderMethodChart(records, activeValue) {
   });
 }
 
-// ─── 3. Department Chart ─── horizontal bar ────────────────────────────────────
 
 /**
  * @param {Object[]} records
@@ -266,7 +245,6 @@ function renderDepartmentChart(records, activeValue) {
     .range([0, innerH])
     .padding(0.2);
 
-  // Grid lines
   g.append("g").attr("class", "grid-lines")
     .selectAll("line")
     .data(xScale.ticks(5))
@@ -278,7 +256,6 @@ function renderDepartmentChart(records, activeValue) {
       .attr("stroke", "var(--chart-grid, #e2e8f0)")
       .attr("stroke-width", 1);
 
-  // Bars
   g.selectAll(".dept-bar")
     .data(rows)
     .join("rect")
@@ -317,7 +294,6 @@ function renderDepartmentChart(records, activeValue) {
         hideChartTooltip();
       });
 
-  // Count labels
   g.selectAll(".dept-label")
     .data(rows)
     .join("text")
@@ -329,7 +305,6 @@ function renderDepartmentChart(records, activeValue) {
       .attr("fill", "var(--chart-label-color, #64748b)")
       .text(d => formatCount(d[1]));
 
-  // Y axis
   g.append("g")
     .attr("class", "axis y-axis")
     .call(d3.axisLeft(yScale).tickSize(0).tickPadding(6))
@@ -340,7 +315,6 @@ function renderDepartmentChart(records, activeValue) {
       .style("cursor", "pointer")
       .on("click", (_event, d) => emitFilter("dept", d));
 
-  // X axis
   g.append("g")
     .attr("class", "axis x-axis")
     .attr("transform", `translate(0,${innerH})`)
@@ -359,7 +333,6 @@ function renderDepartmentChart(records, activeValue) {
     .text("Number of service requests");
 }
 
-// ─── 4. Priority Chart ─── donut ──────────────────────────────────────────────
 
 /**
  * @param {Object[]} records
@@ -373,7 +346,6 @@ function renderPriorityChart(records, activeValue) {
   const rows = rollupByField(records, d => d.priority);
   if (rows.length === 0) { showEmpty(container); return; }
 
-  // Use semantic color scale: values not in map fall back to grey
   const colorScale = d3.scaleOrdinal()
     .domain(Object.keys(PRIORITY_COLORS))
     .range(Object.values(PRIORITY_COLORS))
@@ -385,7 +357,6 @@ function renderPriorityChart(records, activeValue) {
   });
 }
 
-// ─── Donut helper (shared by Method + Priority) ───────────────────────────────
 
 function renderDonut(container, rows, colorScale, filterField, activeValue, opts) {
   const total  = d3.sum(rows, d => d[1]);
@@ -397,7 +368,7 @@ function renderDonut(container, rows, colorScale, filterField, activeValue, opts
   const cx = width / 2;
   const cy = height / 2;
   const outerR = Math.min(cx, cy) - 18;
-  const innerR = outerR * 0.55;  // donut hole
+  const innerR = outerR * 0.55;
 
   const svg = container.append("svg")
     .attr("viewBox", `0 0 ${width} ${totalHeight}`)
@@ -408,7 +379,7 @@ function renderDonut(container, rows, colorScale, filterField, activeValue, opts
 
   const pie = d3.pie()
     .value(d => d[1])
-    .sort(null)          // preserve rollup sort (descending count)
+    .sort(null)
     .padAngle(0.018);
 
   const arc     = d3.arc().innerRadius(innerR).outerRadius(outerR);
@@ -419,7 +390,6 @@ function renderDonut(container, rows, colorScale, filterField, activeValue, opts
   const g = svg.append("g")
     .attr("transform", `translate(${cx},${cy})`);
 
-  // Slices
   g.selectAll(".donut-slice")
     .data(arcs)
     .join("path")
@@ -458,7 +428,6 @@ function renderDonut(container, rows, colorScale, filterField, activeValue, opts
         hideChartTooltip();
       });
 
-  // Center label — total count
   g.append("text")
     .attr("text-anchor", "middle")
     .attr("dy", "-0.2em")
@@ -474,7 +443,6 @@ function renderDonut(container, rows, colorScale, filterField, activeValue, opts
     .attr("fill", "var(--chart-axis-text, #64748b)")
     .text("total requests");
 
-  // Legend
   const legend = svg.append("g")
     .attr("class", "donut-legend")
     .attr("transform", `translate(${width * 0.1}, ${height + 8})`);
@@ -510,7 +478,6 @@ function renderDonut(container, rows, colorScale, filterField, activeValue, opts
   });
 }
 
-// ─── Shared tooltip helpers ───────────────────────────────────────────────────
 
 function showChartTooltip(event, html) {
   let tip = document.getElementById("l3-tooltip");
@@ -541,11 +508,9 @@ function hideChartTooltip() {
   if (tip) { tip.hidden = true; }
 }
 
-// ─── Public API ───────────────────────────────────────────────────────────────
 
 /**
  * Call this whenever filteredRecords changes (from applyFilters in main.js).
- * Optionally pass an activeFilters object to highlight selected values.
  *
  * @param {Object[]} records         – current filteredRecords
  * @param {Object}   [activeFilters] – { neighborhood, method, dept, priority }
@@ -557,5 +522,4 @@ function updateLevel3Charts(records, activeFilters = {}) {
   renderPriorityChart(records, activeFilters.priority || "");
 }
 
-// Expose globally so main.js can call it
 window.updateLevel3Charts = updateLevel3Charts;
