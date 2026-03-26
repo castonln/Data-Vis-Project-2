@@ -1,7 +1,6 @@
 const APP_CONFIG = window.APP_CONFIG || {};
 const SOCRATA_DOMAIN = APP_CONFIG.SOCRATA_DOMAIN || "data.cincinnati-oh.gov";
 
-// Empty or example placeholders must not be sent — Socrata returns 403 for invalid tokens.
 function usableSocrataAppToken(raw) {
   const t = raw == null ? "" : String(raw).trim();
   if (!t) return "";
@@ -10,16 +9,12 @@ function usableSocrataAppToken(raw) {
 }
 
 const SOCRATA_APP_TOKEN = usableSocrataAppToken(APP_CONFIG.SOCRATA_APP_TOKEN);
-
-//Set true after a 403 "invalid app_token" so we paginate without the bad header.
 let omitSocrataAppToken = false;
 
 const DATASET_ID = "gcej-gmiw";
 const TARGET_SERVICE_TYPE = "PTHOLE";
-// Pothole (PTHOLE) requests: API coverage ~2004–2026 (2026 partial).
 const DATE_RANGE_START = "2004-01-01T00:00:00.000";
 const DATE_RANGE_END = "2026-12-31T23:59:59.999";
-/** Socrata SODA defaults to 1,000 rows per request; without paging you only get recent rows (e.g. one year). */
 const SOCRATA_CSV_PAGE_LIMIT = 50000;
 
 const SELECT_FIELDS = [
@@ -36,16 +31,18 @@ const SELECT_FIELDS = [
   "longitude"
 ];
 
+
 let leafletMapInstance = null;
-let allRecords = [];
-let filteredRecords = [];
-let activeBrushRange = null;
-/** Empty string = all */
-let filterDepartment = "";
-/** Empty array = all neighborhoods */
-let filterNeighborhoods = [];
-let filterPriority = "";
-let dataSourceLabel = "Unknown";
+let allRecords         = [];
+let filteredRecords    = [];
+let activeBrushRange   = null;
+
+let filterDepartment     = "";
+let filterNeighborhoods  = [];
+let filterPriority       = "";
+let filterMethodReceived = "";
+
+let dataSourceLabel   = "Unknown";
 let dataWarningMessage = "";
 
 const timelineState = {
@@ -55,6 +52,7 @@ const timelineState = {
   xScale: null,
   bin: "month"
 };
+
 
 function getValue(record, aliases) {
   for (const key of aliases) {
@@ -72,13 +70,13 @@ function parseDate(rawDate) {
 }
 
 function normalizeRecord(record) {
-  const latitudeRaw = getValue(record, ["latitude", "LATITUDE"]);
+  const latitudeRaw  = getValue(record, ["latitude",  "LATITUDE"]);
   const longitudeRaw = getValue(record, ["longitude", "LONGITUDE"]);
-  const latitude = latitudeRaw !== null ? Number(latitudeRaw) : null;
-  const longitude = longitudeRaw !== null ? Number(longitudeRaw) : null;
+  const latitude     = latitudeRaw  !== null ? Number(latitudeRaw)  : null;
+  const longitude    = longitudeRaw !== null ? Number(longitudeRaw) : null;
 
-  const dateCreated = parseDate(getValue(record, ["date_created", "DATE_CREATED"]));
-  const dateLastUpdate = parseDate(getValue(record, ["date_last_update", "DATE_LAST_UPDATE"]));
+  const dateCreated    = parseDate(getValue(record, ["date_created",    "DATE_CREATED"]));
+  const dateLastUpdate = parseDate(getValue(record, ["date_last_update","DATE_LAST_UPDATE"]));
 
   let daysToUpdate = null;
   if (dateCreated && dateLastUpdate) {
@@ -87,16 +85,16 @@ function normalizeRecord(record) {
   }
 
   return {
-    srNumber: getValue(record, ["sr_number", "SR_NUMBER"]) || "Unknown",
-    srType: getValue(record, ["sr_type", "SR_TYPE"]) || "Unknown",
-    srTypeDesc: getValue(record, ["sr_type_desc", "SR_TYPE_DESC"]) || "Unknown",
-    priority: getValue(record, ["priority", "PRIORITY"]) || "Unknown",
-    deptName: getValue(record, ["dept_name", "DEPT_NAME"]) || "Unknown",
+    srNumber:       getValue(record, ["sr_number",       "SR_NUMBER"])       || "Unknown",
+    srType:         getValue(record, ["sr_type",         "SR_TYPE"])         || "Unknown",
+    srTypeDesc:     getValue(record, ["sr_type_desc",    "SR_TYPE_DESC"])    || "Unknown",
+    priority:       getValue(record, ["priority",        "PRIORITY"])        || "Unknown",
+    deptName:       getValue(record, ["dept_name",       "DEPT_NAME"])       || "Unknown",
     methodReceived: getValue(record, ["method_received", "METHOD_RECEIVED"]) || "Unknown",
-    neighborhood: getValue(record, ["neighborhood", "NEIGHBORHOOD"]) || "Unknown",
+    neighborhood:   getValue(record, ["neighborhood",    "NEIGHBORHOOD"])    || "Unknown",
     dateCreated,
     dateLastUpdate,
-    latitude: Number.isFinite(latitude) ? latitude : null,
+    latitude:  Number.isFinite(latitude)  ? latitude  : null,
     longitude: Number.isFinite(longitude) ? longitude : null,
     daysToUpdate
   };
@@ -106,15 +104,12 @@ function normalizeAll(records) {
   return records.map(normalizeRecord);
 }
 
+
 function setDataLoadProgress(message) {
   const el = document.getElementById("data-source");
   if (el) el.textContent = message;
 }
 
-/**
- * CSV export is faster than paginated JSON. Socrata caps each response (default 1,000 rows), so we
- * page with $limit/$offset and stable $order. Same SoQL filter; rows match normalizeRecord().
- */
 async function requestSocrataCsv(url) {
   const headers = {};
   if (SOCRATA_APP_TOKEN && !omitSocrataAppToken) {
@@ -129,12 +124,9 @@ async function requestSocrataCsv(url) {
     let portalMsg = "";
     try {
       const err = JSON.parse(text);
-      if (err && typeof err === "object" && err.message) {
-        portalMsg = String(err.message);
-      }
-    } catch {
-      /* error bodies are usually JSON; plain text is fine */
-    }
+      if (err && typeof err === "object" && err.message) portalMsg = String(err.message);
+    } catch { }
+
     if (
       response.status === 403 &&
       SOCRATA_APP_TOKEN &&
@@ -162,9 +154,7 @@ async function requestSocrataCsv(url) {
     throw new Error(`Socrata returned CSV that could not be parsed: ${hint}`);
   }
 
-  if (!Array.isArray(rows)) {
-    throw new Error("Socrata CSV parse did not return rows.");
-  }
+  if (!Array.isArray(rows)) throw new Error("Socrata CSV parse did not return rows.");
 
   setDataLoadProgress(`Loading from API… ${formatCount(rows.length)} rows`);
   return rows;
@@ -180,18 +170,16 @@ async function fetchAllSocrataRecords() {
   for (let p = 0; p < maxPages; p++) {
     const params = new URLSearchParams({
       $select: SELECT_FIELDS.join(","),
-      $where: whereClause,
-      $order: ":id",
-      $limit: String(SOCRATA_CSV_PAGE_LIMIT),
+      $where:  whereClause,
+      $order:  ":id",
+      $limit:  String(SOCRATA_CSV_PAGE_LIMIT),
       $offset: String(offset)
     });
     const url = `https://${SOCRATA_DOMAIN}/resource/${DATASET_ID}.csv?${params.toString()}`;
     const rows = await requestSocrataCsv(url);
     allRows.push(...rows);
     setDataLoadProgress(`Loading from API… ${formatCount(allRows.length)} rows`);
-    if (rows.length === 0 || rows.length < SOCRATA_CSV_PAGE_LIMIT) {
-      break;
-    }
+    if (rows.length === 0 || rows.length < SOCRATA_CSV_PAGE_LIMIT) break;
     offset += SOCRATA_CSV_PAGE_LIMIT;
   }
 
@@ -199,8 +187,8 @@ async function fetchAllSocrataRecords() {
 }
 
 function isPotholeFromCsv(record) {
-  const type = getValue(record, ["SR_TYPE", "sr_type"]) || "";
-  const typeDesc = getValue(record, ["SR_TYPE_DESC", "sr_type_desc"]) || "";
+  const type     = getValue(record, ["SR_TYPE",     "sr_type"])     || "";
+  const typeDesc = getValue(record, ["SR_TYPE_DESC","sr_type_desc"]) || "";
   return type.toUpperCase() === TARGET_SERVICE_TYPE || typeDesc.toUpperCase().includes("POTHOLE");
 }
 
@@ -212,11 +200,7 @@ async function fetchFallbackCsv() {
 async function loadRecords() {
   try {
     const liveRecords = await fetchAllSocrataRecords();
-    return {
-      sourceLabel: "Live API",
-      warningMessage: "",
-      records: normalizeAll(liveRecords)
-    };
+    return { sourceLabel: "Live API", warningMessage: "", records: normalizeAll(liveRecords) };
   } catch (error) {
     console.warn("Live API failed. Falling back to local CSV.", error);
     const reason = error instanceof Error ? error.message : String(error);
@@ -236,12 +220,13 @@ async function loadRecords() {
     }
     const fallbackRecords = await fetchFallbackCsv();
     return {
-      sourceLabel: "Fallback sample CSV",
+      sourceLabel:    "Fallback sample CSV",
       warningMessage: `Live API did not load. ${detail} Showing local sample CSV instead.`,
-      records: normalizeAll(fallbackRecords)
+      records:        normalizeAll(fallbackRecords)
     };
   }
 }
+
 
 function formatCount(value) {
   return d3.format(",")(value);
@@ -249,39 +234,46 @@ function formatCount(value) {
 
 function formatRange(range) {
   if (!range) return "All dates";
-  const formatter = d3.timeFormat("%b %d, %Y");
+  const formatter    = d3.timeFormat("%b %d, %Y");
   const inclusiveEnd = d3.timeDay.offset(range[1], -1);
   return `${formatter(range[0])} to ${formatter(inclusiveEnd)}`;
 }
 
 function uniqueSortedStrings(values) {
-  return [...new Set(values.map(v => (v != null && String(v).trim() !== "" ? String(v).trim() : "Unknown")))]
-    .sort((a, b) => d3.ascending(a.toLowerCase(), b.toLowerCase()));
+  return [
+    ...new Set(
+      values.map(v =>
+        v != null && String(v).trim() !== "" ? String(v).trim() : "Unknown"
+      )
+    )
+  ].sort((a, b) => d3.ascending(a.toLowerCase(), b.toLowerCase()));
 }
 
-/** Single-select dropdown: only neighborhoods not yet chosen as tags */
+
 function populateNeighborhoodDropdown() {
   const el = document.getElementById("filter-neighborhood");
   if (!el) return;
   const values = uniqueSortedStrings(allRecords.map(d => d.neighborhood));
-  const valid = new Set(values);
+  const valid  = new Set(values);
   filterNeighborhoods = filterNeighborhoods.filter(n => valid.has(n));
-  const taken = new Set(filterNeighborhoods);
+  const taken     = new Set(filterNeighborhoods);
   const available = values.filter(v => !taken.has(v));
 
   el.innerHTML = "";
   const placeholder = document.createElement("option");
   placeholder.value = "";
-  placeholder.textContent = available.length > 0 ? "Add neighborhood…" : "All selected — remove a tag to add more";
+  placeholder.textContent =
+    available.length > 0
+      ? "Add neighborhood…"
+      : "All selected — remove a tag to add more";
   el.appendChild(placeholder);
   available.forEach(v => {
     const opt = document.createElement("option");
-    opt.value = v;
+    opt.value       = v;
     opt.textContent = v;
     el.appendChild(opt);
   });
-
-  el.value = "";
+  el.value    = "";
   el.disabled = available.length === 0;
 }
 
@@ -289,22 +281,18 @@ function fillSelectOptions(selectId, values, allLabel) {
   const el = document.getElementById(selectId);
   if (!el) return;
   const current = el.value;
-  el.innerHTML = "";
+  el.innerHTML  = "";
   const allOpt = document.createElement("option");
-  allOpt.value = "";
+  allOpt.value       = "";
   allOpt.textContent = allLabel;
   el.appendChild(allOpt);
   values.forEach(v => {
     const opt = document.createElement("option");
-    opt.value = v;
+    opt.value       = v;
     opt.textContent = v;
     el.appendChild(opt);
   });
-  if (values.includes(current)) {
-    el.value = current;
-  } else {
-    el.value = "";
-  }
+  el.value = values.includes(current) ? current : "";
 }
 
 function renderFilterChips() {
@@ -312,30 +300,35 @@ function renderFilterChips() {
   if (!el) return;
 
   const items = [];
-  if (filterDepartment) items.push({ field: "filterDepartment", label: "Dept", value: filterDepartment });
-  filterNeighborhoods.forEach(n => {
-    items.push({ field: "filterNeighborhood", label: "Area", value: n, filterValue: n });
-  });
-  if (filterPriority) items.push({ field: "filterPriority", label: "Priority", value: filterPriority });
+  if (filterDepartment)
+    items.push({ field: "filterDepartment", label: "Dept",     value: filterDepartment });
+  filterNeighborhoods.forEach(n =>
+    items.push({ field: "filterNeighborhood", label: "Area",   value: n, filterValue: n })
+  );
+  if (filterPriority)
+    items.push({ field: "filterPriority",    label: "Priority", value: filterPriority });
+  if (filterMethodReceived)
+    items.push({ field: "filterMethod",      label: "Method",   value: filterMethodReceived });
 
   el.innerHTML = "";
-  if (items.length === 0) {
-    el.hidden = true;
-    return;
-  }
+  if (items.length === 0) { el.hidden = true; return; }
 
   el.hidden = false;
   items.forEach(({ field, label, value, filterValue }) => {
     const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = field === "filterNeighborhood" ? "filter-chip filter-chip-neighborhood" : "filter-chip";
+    btn.type      = "button";
+    btn.className = field === "filterNeighborhood"
+      ? "filter-chip filter-chip-neighborhood"
+      : "filter-chip";
     btn.dataset.filterField = field;
     if (field === "filterNeighborhood" && filterValue !== undefined) {
       btn.dataset.filterValue = filterValue;
     }
     btn.setAttribute(
       "aria-label",
-      field === "filterNeighborhood" ? `Remove neighborhood: ${value}` : `Remove ${label} filter: ${value}`
+      field === "filterNeighborhood"
+        ? `Remove neighborhood: ${value}`
+        : `Remove ${label} filter: ${value}`
     );
     const span = document.createElement("span");
     span.textContent = field === "filterNeighborhood" ? value : `${label}: ${value}`;
@@ -362,33 +355,37 @@ function populateFilterSelects() {
   );
 }
 
+
 function updateStatusPanel() {
-  const mappedFiltered = filteredRecords.filter(d => d.latitude !== null && d.longitude !== null).length;
+  const mappedFiltered   = filteredRecords.filter(d => d.latitude !== null && d.longitude !== null).length;
   const unmappedFiltered = filteredRecords.length - mappedFiltered;
 
-  document.getElementById("data-source").textContent = dataSourceLabel;
-  document.getElementById("count-total").textContent = formatCount(filteredRecords.length);
-  document.getElementById("count-mapped").textContent = formatCount(mappedFiltered);
-  document.getElementById("count-unmapped").textContent = formatCount(unmappedFiltered);
+  document.getElementById("data-source").textContent      = dataSourceLabel;
+  document.getElementById("count-total").textContent      = formatCount(filteredRecords.length);
+  document.getElementById("count-mapped").textContent     = formatCount(mappedFiltered);
+  document.getElementById("count-unmapped").textContent   = formatCount(unmappedFiltered);
   document.getElementById("count-total-year").textContent = formatCount(allRecords.length);
+
   const partialEl = document.getElementById("partial-year-note");
   if (partialEl) {
     partialEl.hidden = !allRecords.some(
       r => r.dateCreated && r.dateCreated.getFullYear() === 2026
     );
   }
+
   document.getElementById("active-range").textContent = formatRange(activeBrushRange);
+
   const attrParts = [];
   const tyEl = document.getElementById("timeline-year");
-  const ty = tyEl && tyEl.value ? tyEl.value.trim() : "";
-  if (ty) attrParts.push(`Timeline year: ${ty}`);
-  if (filterDepartment) attrParts.push(`Dept: ${filterDepartment}`);
+  const ty   = tyEl && tyEl.value ? tyEl.value.trim() : "";
+  if (ty)                       attrParts.push(`Timeline year: ${ty}`);
+  if (filterDepartment)         attrParts.push(`Dept: ${filterDepartment}`);
   if (filterNeighborhoods.length) attrParts.push(`Area: ${filterNeighborhoods.join(", ")}`);
-  if (filterPriority) attrParts.push(`Priority: ${filterPriority}`);
+  if (filterPriority)           attrParts.push(`Priority: ${filterPriority}`);
+  if (filterMethodReceived)     attrParts.push(`Method: ${filterMethodReceived}`);
+
   const attrEl = document.getElementById("active-filters");
-  if (attrEl) {
-    attrEl.textContent = attrParts.length ? attrParts.join(" · ") : "None";
-  }
+  if (attrEl) attrEl.textContent = attrParts.length ? attrParts.join(" · ") : "None";
 
   renderFilterChips();
 
@@ -402,17 +399,18 @@ function updateStatusPanel() {
       warningEl.hidden = true;
     }
   }
+
+  const countBadge = document.getElementById("l3-record-count");
+  if (countBadge) countBadge.textContent = formatCount(filteredRecords.length);
 }
+
 
 function renderCategoryChart(containerId, records, accessor, limit) {
   const container = d3.select(containerId);
   container.html("");
 
-  const counts = d3.rollups(
-    records,
-    values => values.length,
-    d => accessor(d) || "Unknown"
-  ).sort((a, b) => d3.descending(a[1], b[1]));
+  const counts = d3.rollups(records, values => values.length, d => accessor(d) || "Unknown")
+    .sort((a, b) => d3.descending(a[1], b[1]));
 
   const rows = typeof limit === "number" ? counts.slice(0, limit) : counts;
   if (rows.length === 0) {
@@ -424,21 +422,20 @@ function renderCategoryChart(containerId, records, accessor, limit) {
   rows.forEach(([label, count]) => {
     const row = container.append("div").attr("class", "mini-row");
     row.append("div").attr("class", "mini-label").text(label);
-
     const barWrap = row.append("div").attr("class", "mini-bar-wrap");
     barWrap.append("div")
       .attr("class", "mini-bar")
       .style("width", `${(count / maxCount) * 100}%`);
-
     row.append("div").attr("class", "mini-value").text(formatCount(count));
   });
 }
 
 function updateSummaryCharts() {
   renderCategoryChart("#methods-chart", filteredRecords, d => d.methodReceived, 7);
-  renderCategoryChart("#depts-chart", filteredRecords, d => d.deptName, 7);
-  renderCategoryChart("#priority-chart", filteredRecords, d => d.priority, null);
+  renderCategoryChart("#depts-chart",   filteredRecords, d => d.deptName,       7);
+  renderCategoryChart("#priority-chart",filteredRecords, d => d.priority,       null);
 }
+
 
 const PTHOLE_MIN_YEAR = 2004;
 
@@ -464,56 +461,52 @@ function buildTimelineSeries(records, bin, yearFilter) {
   const [minD, maxD] = d3.extent(subset, d => d.dateCreated);
 
   if (bin === "month") {
-    const start = d3.timeMonth.floor(minD);
-    const end = d3.timeMonth.ceil(maxD);
+    const start  = d3.timeMonth.floor(minD);
+    const end    = d3.timeMonth.ceil(maxD);
     const months = d3.timeMonth.range(start, end);
     const counts = d3.rollup(subset, v => v.length, d => +d3.timeMonth.floor(d.dateCreated));
     return months.map(monthStart => ({
       periodStart: monthStart,
-      periodEnd: d3.timeMonth.offset(monthStart, 1),
-      count: counts.get(+monthStart) || 0,
-      bin: "month"
+      periodEnd:   d3.timeMonth.offset(monthStart, 1),
+      count:       counts.get(+monthStart) || 0,
+      bin:         "month"
     }));
   }
 
   const weekStart0 = d3.timeMonday.floor(minD);
-  const weekEnd = d3.timeMonday.ceil(maxD);
-  const weeks = d3.timeMonday.range(weekStart0, weekEnd);
-  const counts = d3.rollup(subset, v => v.length, d => +d3.timeMonday.floor(d.dateCreated));
+  const weekEnd    = d3.timeMonday.ceil(maxD);
+  const weeks      = d3.timeMonday.range(weekStart0, weekEnd);
+  const counts     = d3.rollup(subset, v => v.length, d => +d3.timeMonday.floor(d.dateCreated));
   return weeks.map(weekStart => ({
     periodStart: weekStart,
-    periodEnd: d3.timeMonday.offset(weekStart, 1),
-    count: counts.get(+weekStart) || 0,
-    bin: "week"
+    periodEnd:   d3.timeMonday.offset(weekStart, 1),
+    count:       counts.get(+weekStart) || 0,
+    bin:         "week"
   }));
 }
 
 function populateTimelineYearSelect() {
   const el = document.getElementById("timeline-year");
   if (!el) return;
-  const ext = getRecordsDateExtent(allRecords);
-  const minY = ext ? ext[0].getFullYear() : PTHOLE_MIN_YEAR;
-  const maxY = ext ? ext[1].getFullYear() : 2026;
-  const lowYear = Math.min(minY, maxY);
-  const highYear = Math.max(minY, maxY);
-  const yStart = Math.max(PTHOLE_MIN_YEAR, lowYear);
-  const yEnd = Math.min(2026, highYear);
+  const ext    = getRecordsDateExtent(allRecords);
+  const minY   = ext ? ext[0].getFullYear() : PTHOLE_MIN_YEAR;
+  const maxY   = ext ? ext[1].getFullYear() : 2026;
+  const yStart = Math.max(PTHOLE_MIN_YEAR, Math.min(minY, maxY));
+  const yEnd   = Math.min(2026, Math.max(minY, maxY));
   const current = el.value;
 
   el.innerHTML = "";
   const allOpt = document.createElement("option");
-  allOpt.value = "";
+  allOpt.value       = "";
   allOpt.textContent = "All years (monthly bins)";
   el.appendChild(allOpt);
   for (let y = yEnd; y >= yStart; y -= 1) {
     const opt = document.createElement("option");
-    opt.value = String(y);
+    opt.value       = String(y);
     opt.textContent = y === 2026 ? `${y} (partial)` : String(y);
     el.appendChild(opt);
   }
-  if (current && [...el.options].some(o => o.value === current)) {
-    el.value = current;
-  }
+  if (current && [...el.options].some(o => o.value === current)) el.value = current;
 }
 
 function handleBrush(event) {
@@ -529,17 +522,13 @@ function handleBrush(event) {
 
   if (timelineState.bin === "month") {
     const startDate = d3.timeMonth.floor(inv0);
-    let endDate = d3.timeMonth.ceil(inv1);
-    if (endDate <= startDate) {
-      endDate = d3.timeMonth.offset(startDate, 1);
-    }
+    let   endDate   = d3.timeMonth.ceil(inv1);
+    if (endDate <= startDate) endDate = d3.timeMonth.offset(startDate, 1);
     activeBrushRange = [startDate, endDate];
   } else {
     const startDate = d3.timeMonday.floor(inv0);
-    let endDate = d3.timeMonday.ceil(inv1);
-    if (endDate <= startDate) {
-      endDate = d3.timeMonday.offset(startDate, 1);
-    }
+    let   endDate   = d3.timeMonday.ceil(inv1);
+    if (endDate <= startDate) endDate = d3.timeMonday.offset(startDate, 1);
     activeBrushRange = [startDate, endDate];
   }
   applyFilters();
@@ -549,24 +538,21 @@ function positionTimelineTooltip(event, html) {
   const tip = document.getElementById("timeline-tooltip");
   if (!tip) return;
   tip.innerHTML = html;
-  tip.hidden = false;
+  tip.hidden    = false;
   const pad = 12;
-  const w = tip.offsetWidth;
-  const h = tip.offsetHeight;
-  let left = event.clientX + pad;
-  let top = event.clientY + pad;
-  if (left + w > window.innerWidth - 8) left = event.clientX - w - pad;
-  if (top + h > window.innerHeight - 8) top = event.clientY - h - pad;
+  const w   = tip.offsetWidth;
+  const h   = tip.offsetHeight;
+  let left  = event.clientX + pad;
+  let top   = event.clientY + pad;
+  if (left + w > window.innerWidth  - 8) left = event.clientX - w - pad;
+  if (top  + h > window.innerHeight - 8) top  = event.clientY - h - pad;
   tip.style.left = `${left}px`;
-  tip.style.top = `${top}px`;
+  tip.style.top  = `${top}px`;
 }
 
 function hideTimelineTooltip() {
   const tip = document.getElementById("timeline-tooltip");
-  if (tip) {
-    tip.hidden = true;
-    tip.innerHTML = "";
-  }
+  if (tip) { tip.hidden = true; tip.innerHTML = ""; }
 }
 
 function formatTimelineBarTooltip(d) {
@@ -574,22 +560,23 @@ function formatTimelineBarTooltip(d) {
     const label = d3.timeFormat("%B %Y")(d.periodStart);
     return `<strong>${label}</strong><br>${formatCount(d.count)} requests`;
   }
-  const endDay = d3.timeDay.offset(d.periodEnd, -1);
-  const rangeLabel = `${d3.timeFormat("%b %d, %Y")(d.periodStart)} – ${d3.timeFormat("%b %d, %Y")(endDay)}`;
+  const endDay   = d3.timeDay.offset(d.periodEnd, -1);
+  const rangeLabel =
+    `${d3.timeFormat("%b %d, %Y")(d.periodStart)} – ${d3.timeFormat("%b %d, %Y")(endDay)}`;
   return `<strong>${rangeLabel}</strong><br>${formatCount(d.count)} requests`;
 }
 
 function renderTimeline(records) {
-  const yearEl = document.getElementById("timeline-year");
-  const yearFilter = yearEl && yearEl.value ? yearEl.value : "";
-  const bin = getTimelineBin();
+  const yearEl      = document.getElementById("timeline-year");
+  const yearFilter  = yearEl && yearEl.value ? yearEl.value : "";
+  const bin         = getTimelineBin();
   timelineState.bin = bin;
 
-  const series = buildTimelineSeries(records, bin, yearFilter);
+  const series    = buildTimelineSeries(records, bin, yearFilter);
   const container = document.getElementById("timeline-chart");
-  const width = Math.max(860, container.clientWidth || 860);
-  const height = 280;
-  const margin = { top: 14, right: 18, bottom: 48, left: 52 };
+  const width     = Math.max(860, container.clientWidth || 860);
+  const height    = 280;
+  const margin    = { top: 14, right: 18, bottom: 48, left: 52 };
 
   d3.select("#timeline-chart").html("");
 
@@ -598,22 +585,22 @@ function renderTimeline(records) {
       .append("p")
       .attr("class", "mini-empty")
       .text("No dated requests for this timeline selection.");
-    timelineState.svg = null;
-    timelineState.brush = null;
+    timelineState.svg        = null;
+    timelineState.brush      = null;
     timelineState.brushGroup = null;
-    timelineState.xScale = null;
+    timelineState.xScale     = null;
     return;
   }
 
   const svg = d3.select("#timeline-chart")
     .append("svg")
     .attr("viewBox", `0 0 ${width} ${height}`)
-    .attr("width", "100%")
+    .attr("width",  "100%")
     .attr("height", "auto")
     .attr("font-family", '"IBM Plex Sans", system-ui, sans-serif');
 
   const xDomainStart = series[0].periodStart;
-  const xDomainEnd = series[series.length - 1].periodEnd;
+  const xDomainEnd   = series[series.length - 1].periodEnd;
 
   const xScale = d3.scaleTime()
     .domain([xDomainStart, xDomainEnd])
@@ -624,32 +611,27 @@ function renderTimeline(records) {
     .nice()
     .range([height - margin.bottom, margin.top]);
 
-  const barWidth = (d) => {
-    const w = xScale(d.periodEnd) - xScale(d.periodStart);
-    return Math.max(1, w - 1);
-  };
+  const barWidth = d => Math.max(1, xScale(d.periodEnd) - xScale(d.periodStart) - 1);
 
   svg.append("g")
     .selectAll("rect")
     .data(series)
     .join("rect")
-    .attr("class", "timeline-bar")
-    .attr("x", d => xScale(d.periodStart))
-    .attr("y", d => yScale(d.count))
-    .attr("width", d => barWidth(d))
-    .attr("height", d => yScale(0) - yScale(d.count))
-    .on("mousemove", (event, d) => {
-      positionTimelineTooltip(event, formatTimelineBarTooltip(d));
-    })
-    .on("mouseleave", hideTimelineTooltip);
+      .attr("class",  "timeline-bar")
+      .attr("x",      d => xScale(d.periodStart))
+      .attr("y",      d => yScale(d.count))
+      .attr("width",  d => barWidth(d))
+      .attr("height", d => yScale(0) - yScale(d.count))
+      .on("mousemove",  (event, d) => positionTimelineTooltip(event, formatTimelineBarTooltip(d)))
+      .on("mouseleave", hideTimelineTooltip);
 
   const xAxis = bin === "month"
     ? d3.axisBottom(xScale)
-      .ticks(series.length > 48 ? d3.timeYear.every(2) : d3.timeYear.every(1))
-      .tickFormat(d3.timeFormat("%Y"))
+        .ticks(series.length > 48 ? d3.timeYear.every(2) : d3.timeYear.every(1))
+        .tickFormat(d3.timeFormat("%Y"))
     : d3.axisBottom(xScale)
-      .ticks(d3.timeMonth.every(1))
-      .tickFormat(d3.timeFormat("%b"));
+        .ticks(d3.timeMonth.every(1))
+        .tickFormat(d3.timeFormat("%b"));
 
   svg.append("g")
     .attr("transform", `translate(0,${height - margin.bottom})`)
@@ -668,22 +650,22 @@ function renderTimeline(records) {
     : `Time (weekly bins, ${yearFilter})`;
 
   svg.append("text")
-    .attr("x", width / 2)
-    .attr("y", height - 8)
-    .attr("text-anchor", "middle")
-    .attr("fill", "#64748b")
-    .attr("font-size", 12)
+    .attr("x",            width / 2)
+    .attr("y",            height - 8)
+    .attr("text-anchor",  "middle")
+    .attr("fill",         "#64748b")
+    .attr("font-size",    12)
     .text(xAxisLabel);
 
   svg.append("text")
-    .attr("transform", `translate(15,${height / 2}) rotate(-90)`)
+    .attr("transform",   `translate(15,${height / 2}) rotate(-90)`)
     .attr("text-anchor", "middle")
-    .attr("fill", "#64748b")
-    .attr("font-size", 12)
+    .attr("fill",        "#64748b")
+    .attr("font-size",   12)
     .text("Requests per period");
 
   svg.selectAll(".tick text")
-    .attr("fill", "#64748b")
+    .attr("fill",      "#64748b")
     .attr("font-size", 11);
 
   const brush = d3.brushX()
@@ -697,69 +679,103 @@ function renderTimeline(records) {
     .attr("class", "brush")
     .call(brush);
 
-  timelineState.svg = svg;
-  timelineState.brush = brush;
+  timelineState.svg        = svg;
+  timelineState.brush      = brush;
   timelineState.brushGroup = brushGroup;
-  timelineState.xScale = xScale;
+  timelineState.xScale     = xScale;
 }
+
 
 function applyFilters() {
   let next = allRecords.slice();
 
   const timelineYearEl = document.getElementById("timeline-year");
-  const timelineYear = timelineYearEl && timelineYearEl.value ? timelineYearEl.value.trim() : "";
+  const timelineYear   = timelineYearEl && timelineYearEl.value
+    ? timelineYearEl.value.trim() : "";
   if (timelineYear) {
     const y = Number(timelineYear);
-    next = next.filter(
-      record => record.dateCreated && record.dateCreated.getFullYear() === y
-    );
+    next = next.filter(r => r.dateCreated && r.dateCreated.getFullYear() === y);
   }
 
   if (activeBrushRange) {
-    next = next.filter(record => {
-      if (!record.dateCreated) return false;
-      return record.dateCreated >= activeBrushRange[0] && record.dateCreated < activeBrushRange[1];
+    next = next.filter(r => {
+      if (!r.dateCreated) return false;
+      return r.dateCreated >= activeBrushRange[0] && r.dateCreated < activeBrushRange[1];
     });
   }
 
-  if (filterDepartment) {
-    next = next.filter(r => r.deptName === filterDepartment);
-  }
+  if (filterDepartment)        next = next.filter(r => r.deptName       === filterDepartment);
   if (filterNeighborhoods.length > 0) {
     const nh = new Set(filterNeighborhoods);
     next = next.filter(r => nh.has(r.neighborhood));
   }
-  if (filterPriority) {
-    next = next.filter(r => r.priority === filterPriority);
-  }
+  if (filterPriority)          next = next.filter(r => r.priority       === filterPriority);
+  if (filterMethodReceived)    next = next.filter(r => r.methodReceived  === filterMethodReceived);
 
   filteredRecords = next;
 
-  if (leafletMapInstance) {
-    leafletMapInstance.setFilteredData(filteredRecords);
-  }
+  if (leafletMapInstance) leafletMapInstance.setFilteredData(filteredRecords);
 
   updateSummaryCharts();
   updateStatusPanel();
+
+  if (typeof window.updateLevel3Charts === "function") {
+    window.updateLevel3Charts(filteredRecords, {
+      neighborhood: filterNeighborhoods[0] || "",
+      method:       filterMethodReceived,
+      dept:         filterDepartment,
+      priority:     filterPriority
+    });
+  }
 }
 
+
+window.onLevel3Filter = function (field, value) {
+  if (field === "neighborhood") {
+    const idx = filterNeighborhoods.indexOf(value);
+    if (idx === -1) {
+      filterNeighborhoods.push(value);
+      filterNeighborhoods.sort((a, b) =>
+        a.localeCompare(b, undefined, { sensitivity: "base" })
+      );
+    } else {
+      filterNeighborhoods.splice(idx, 1);
+    }
+    populateNeighborhoodDropdown();
+
+  } else if (field === "method") {
+    filterMethodReceived = filterMethodReceived === value ? "" : value;
+
+  } else if (field === "dept") {
+    filterDepartment = filterDepartment === value ? "" : value;
+    const deptEl = document.getElementById("filter-dept");
+    if (deptEl) deptEl.value = filterDepartment;
+
+  } else if (field === "priority") {
+    filterPriority = filterPriority === value ? "" : value;
+    const prioEl = document.getElementById("filter-priority");
+    if (prioEl) prioEl.value = filterPriority;
+  }
+
+  applyFilters();
+};
+
+
 function wireUiEvents() {
-  const colorModeSelect = document.getElementById("color-mode");
-  const basemapToggleButton = document.getElementById("basemap-toggle");
-  const mapModeToggleButton = document.getElementById("map-mode-toggle");
-  const clearBrushButton = document.getElementById("clear-brush");
-  const heatAvailable = Boolean(leafletMapInstance && leafletMapInstance.heatLayer);
+  const colorModeSelect      = document.getElementById("color-mode");
+  const basemapToggleButton  = document.getElementById("basemap-toggle");
+  const mapModeToggleButton  = document.getElementById("map-mode-toggle");
+  const clearBrushButton     = document.getElementById("clear-brush");
+  const heatAvailable        = Boolean(leafletMapInstance && leafletMapInstance.heatLayer);
 
   if (!heatAvailable) {
-    mapModeToggleButton.disabled = true;
+    mapModeToggleButton.disabled    = true;
     mapModeToggleButton.textContent = "Heatmap N/A";
     document.getElementById("map-mode-label").textContent = "Points only";
   }
 
   colorModeSelect.addEventListener("change", event => {
-    if (leafletMapInstance) {
-      leafletMapInstance.setColorMode(event.target.value);
-    }
+    if (leafletMapInstance) leafletMapInstance.setColorMode(event.target.value);
   });
 
   if (!leafletMapInstance.cycleLayer) {
@@ -770,22 +786,18 @@ function wireUiEvents() {
 
   basemapToggleButton.addEventListener("click", () => {
     if (!leafletMapInstance || !leafletMapInstance.cycleLayer) return;
-
     const activeBasemap = leafletMapInstance.toggleBasemap();
-    const isStreet = activeBasemap === "street";
+    const isStreet      = activeBasemap === "street";
     basemapToggleButton.textContent = isStreet ? "OpenCycleMap" : "Street map";
     const label = document.getElementById("basemap-label");
-    if (label) {
-      label.textContent = isStreet ? "Street (OSM)" : "OpenCycleMap";
-    }
+    if (label) label.textContent = isStreet ? "Street (OSM)" : "OpenCycleMap";
   });
 
   mapModeToggleButton.addEventListener("click", () => {
     if (!leafletMapInstance || !leafletMapInstance.heatLayer) return;
-    const nextMode = leafletMapInstance.activeMapMode === "points" ? "heat" : "points";
+    const nextMode   = leafletMapInstance.activeMapMode === "points" ? "heat" : "points";
     const activeMode = leafletMapInstance.setMapMode(nextMode);
-    const isPoints = activeMode === "points";
-
+    const isPoints   = activeMode === "points";
     mapModeToggleButton.textContent = isPoints ? "Heatmap" : "Points";
     document.getElementById("map-mode-label").textContent = isPoints ? "Points" : "Heatmap";
     colorModeSelect.disabled = !isPoints;
@@ -808,18 +820,18 @@ function wireUiEvents() {
     });
   }
 
-  const filterDept = document.getElementById("filter-dept");
+  const filterDept          = document.getElementById("filter-dept");
   const filterNeighborhoodEl = document.getElementById("filter-neighborhood");
-  const filterPriorityEl = document.getElementById("filter-priority");
-  const clearFiltersButton = document.getElementById("clear-filters");
+  const filterPriorityEl    = document.getElementById("filter-priority");
+  const clearFiltersButton  = document.getElementById("clear-filters");
 
   const onDeptPriorityChange = () => {
-    filterDepartment = filterDept ? filterDept.value : "";
-    filterPriority = filterPriorityEl ? filterPriorityEl.value : "";
+    filterDepartment = filterDept       ? filterDept.value       : "";
+    filterPriority   = filterPriorityEl ? filterPriorityEl.value : "";
     applyFilters();
   };
 
-  if (filterDept) filterDept.addEventListener("change", onDeptPriorityChange);
+  if (filterDept)       filterDept.addEventListener("change",       onDeptPriorityChange);
   if (filterPriorityEl) filterPriorityEl.addEventListener("change", onDeptPriorityChange);
 
   if (filterNeighborhoodEl) {
@@ -828,7 +840,9 @@ function wireUiEvents() {
       if (!v) return;
       if (!filterNeighborhoods.includes(v)) {
         filterNeighborhoods.push(v);
-        filterNeighborhoods.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+        filterNeighborhoods.sort((a, b) =>
+          a.localeCompare(b, undefined, { sensitivity: "base" })
+        );
       }
       populateNeighborhoodDropdown();
       applyFilters();
@@ -837,10 +851,11 @@ function wireUiEvents() {
 
   if (clearFiltersButton) {
     clearFiltersButton.addEventListener("click", () => {
-      filterDepartment = "";
+      filterDepartment    = "";
       filterNeighborhoods = [];
-      filterPriority = "";
-      if (filterDept) filterDept.value = "";
+      filterPriority      = "";
+      filterMethodReceived = "";
+      if (filterDept)       filterDept.value       = "";
       if (filterPriorityEl) filterPriorityEl.value = "";
       populateNeighborhoodDropdown();
       applyFilters();
@@ -853,6 +868,7 @@ function wireUiEvents() {
       const chip = event.target.closest(".filter-chip");
       if (!chip || !chip.dataset.filterField) return;
       const field = chip.dataset.filterField;
+
       if (field === "filterDepartment") {
         filterDepartment = "";
         if (filterDept) filterDept.value = "";
@@ -863,29 +879,32 @@ function wireUiEvents() {
       } else if (field === "filterPriority") {
         filterPriority = "";
         if (filterPriorityEl) filterPriorityEl.value = "";
+      } else if (field === "filterMethod") {
+        filterMethodReceived = "";
       }
       applyFilters();
     });
   }
 }
 
+
 async function initializeApp() {
   setDataLoadProgress("Connecting to API…");
   const dataset = await loadRecords();
-  dataSourceLabel = dataset.sourceLabel;
+  dataSourceLabel   = dataset.sourceLabel;
   dataWarningMessage = dataset.warningMessage || "";
 
-  allRecords = dataset.records.slice();
+  allRecords      = dataset.records.slice();
   filteredRecords = allRecords.slice();
 
   leafletMapInstance = new LeafletMap(
     {
-      parentElement: "#my-map",
-      tooltipElement: "#tooltip",
-      legendElement: "#legend",
+      parentElement:    "#my-map",
+      tooltipElement:   "#tooltip",
+      legendElement:    "#legend",
       initialColorMode: "daysToUpdate",
-      initialBasemap: "street",
-      initialMapMode: "points"
+      initialBasemap:   "street",
+      initialMapMode:   "points"
     },
     filteredRecords
   );
@@ -905,17 +924,23 @@ async function initializeApp() {
   wireUiEvents();
 
   const basemapLabel = document.getElementById("basemap-label");
-  const basemapBtn = document.getElementById("basemap-toggle");
+  const basemapBtn   = document.getElementById("basemap-toggle");
   if (leafletMapInstance && basemapLabel && basemapBtn) {
     const street = leafletMapInstance.activeBasemap === "street";
     basemapLabel.textContent = street ? "Street (OSM)" : "OpenCycleMap";
-    basemapBtn.textContent = street ? "OpenCycleMap" : "Street map";
+    basemapBtn.textContent   = street ? "OpenCycleMap" : "Street map";
+  }
+
+  if (typeof window.updateLevel3Charts === "function") {
+    window.updateLevel3Charts(filteredRecords, {});
   }
 }
 
 initializeApp().catch(error => {
   console.error("Unable to initialize app", error);
   const warningEl = document.getElementById("data-warning");
-  warningEl.textContent = "Failed to initialize the visualization.";
-  warningEl.hidden = false;
+  if (warningEl) {
+    warningEl.textContent = "Failed to initialize the visualization.";
+    warningEl.hidden = false;
+  }
 });

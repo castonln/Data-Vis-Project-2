@@ -14,11 +14,17 @@
 </head>
 <body>
     <main class="app-shell">
+
         <header class="card hero-card">
             <h1>Cincinnati 311 Pothole Requests</h1>
-            <p class="subtitle">Interactive map of pothole (PTHOLE) requests. Live data covers about 2004–2026. 2026 is partial (through March 21). Earliest years have very few records.</p>
+            <p class="subtitle">
+                Interactive map of pothole (PTHOLE) requests.
+                Live data covers about 2004–2026. 2026 is partial (through March 21).
+                Earliest years have very few records.
+            </p>
 
             <div class="dashboard-controls" aria-label="Visualization controls">
+
                 <section class="controls-block controls-map" aria-labelledby="controls-map-title">
                     <h3 id="controls-map-title" class="controls-heading">Map</h3>
                     <div class="controls-map-inner">
@@ -33,7 +39,11 @@
                         </div>
                         <menu class="buttons map-action-buttons">
                             <li><button id="map-mode-toggle" type="button">Heatmap</button></li>
-                            <li><button id="basemap-toggle" type="button" data-variant="secondary">OpenCycleMap</button></li>
+                            <li>
+                                <button id="basemap-toggle" type="button" data-variant="secondary">
+                                    OpenCycleMap
+                                </button>
+                            </li>
                         </menu>
                     </div>
                 </section>
@@ -43,7 +53,10 @@
                         <div>
                             <h3 id="controls-scope-title" class="controls-heading">Data scope</h3>
                         </div>
-                        <button id="clear-filters" type="button" data-variant="secondary" class="outline small clear-scope-btn">Clear scope</button>
+                        <button id="clear-filters" type="button" data-variant="secondary"
+                                class="outline small clear-scope-btn">
+                            Clear scope
+                        </button>
                     </div>
                     <div class="scope-fields">
                         <div class="field">
@@ -54,7 +67,8 @@
                         </div>
                         <div class="field field-neighborhood">
                             <label for="filter-neighborhood">Neighborhood</label>
-                            <select id="filter-neighborhood" aria-label="Add a neighborhood to filter">
+                            <select id="filter-neighborhood"
+                                    aria-label="Add a neighborhood to filter">
                                 <option value="">Add neighborhood…</option>
                             </select>
                         </div>
@@ -65,8 +79,10 @@
                             </select>
                         </div>
                     </div>
-                    <div id="filter-chips" class="filter-chips" role="group" aria-label="Active scope filters" hidden></div>
+                    <div id="filter-chips" class="filter-chips" role="group"
+                         aria-label="Active scope filters" hidden></div>
                 </section>
+
             </div>
         </header>
 
@@ -81,12 +97,21 @@
                         </select>
                     </div>
                     <menu class="buttons timeline-actions">
-                        <li><button id="clear-brush" type="button" data-variant="secondary" class="outline">Reset date filter</button></li>
+                        <li>
+                            <button id="clear-brush" type="button"
+                                    data-variant="secondary" class="outline">
+                                Reset date filter
+                            </button>
+                        </li>
                     </menu>
                 </div>
             </div>
             <div id="timeline-chart"></div>
-            <p id="timeline-help">All years: monthly counts. Choosing a year switches to weekly counts and filters the map and charts to that year. Drag on the chart to narrow the date range further. Compare full calendar years only.</p>
+            <p id="timeline-help">
+                All years: monthly counts. Choosing a year switches to weekly counts and
+                filters the map and charts to that year. Drag on the chart to narrow the
+                date range further. Compare full calendar years only.
+            </p>
         </section>
 
         <section class="dashboard-grid">
@@ -102,16 +127,28 @@
 
                 <section class="status-section">
                     <h2>Data Status</h2>
-                    <p><strong>Source:</strong> <span id="data-source">Loading...</span></p>
-                    <p><strong>Requests in filter:</strong> <span id="count-total">-</span></p>
-                    <p><strong>Mapped in filter:</strong> <span id="count-mapped">-</span></p>
-                    <p><strong>Missing coords in filter:</strong> <span id="count-unmapped">-</span></p>
-                    <p><strong>Total loaded:</strong> <span id="count-total-year">-</span></p>
-                    <p id="partial-year-note" class="status-partial-note" hidden><strong>Note:</strong> 2026 data is partial (through March 21). Year-over-year comparisons should treat 2026 separately.</p>
-                    <p><strong>Active basemap:</strong> <span id="basemap-label">Street</span></p>
-                    <p><strong>Active map mode:</strong> <span id="map-mode-label">Points</span></p>
-                    <p><strong>Active date range:</strong> <span id="active-range">All dates</span></p>
-                    <p><strong>Attribute filters:</strong> <span id="active-filters">None</span></p>
+                    <p><strong>Source:</strong>
+                        <span id="data-source">Loading…</span></p>
+                    <p><strong>Requests in filter:</strong>
+                        <span id="count-total">–</span></p>
+                    <p><strong>Mapped in filter:</strong>
+                        <span id="count-mapped">–</span></p>
+                    <p><strong>Missing coords in filter:</strong>
+                        <span id="count-unmapped">–</span></p>
+                    <p><strong>Total loaded:</strong>
+                        <span id="count-total-year">–</span></p>
+                    <p id="partial-year-note" class="status-partial-note" hidden>
+                        <strong>Note:</strong> 2026 data is partial (through March 21).
+                        Year-over-year comparisons should treat 2026 separately.
+                    </p>
+                    <p><strong>Active basemap:</strong>
+                        <span id="basemap-label">Street</span></p>
+                    <p><strong>Active map mode:</strong>
+                        <span id="map-mode-label">Points</span></p>
+                    <p><strong>Active date range:</strong>
+                        <span id="active-range">All dates</span></p>
+                    <p><strong>Attribute filters:</strong>
+                        <span id="active-filters">None</span></p>
                 </section>
 
                 <div id="data-warning" role="alert" hidden></div>
@@ -132,13 +169,59 @@
                 </section>
             </aside>
         </section>
+
+
+        <p class="text-light mt-6 mb-4">
+            Attribute Views
+        </p>
+
+        <div class="row">
+
+            <div class="col-12">
+                <section class="card" id="card-neighborhood">
+                    <div class="timeline-header">
+                        <h2>Top Neighborhoods by Requests</h2>
+                    </div>
+                    <div id="neighborhood-chart"></div>
+                </section>
+            </div>
+
+            <div class="col-6">
+                <section class="card" id="card-method">
+                    <div class="timeline-header">
+                        <h2>Method Received</h2>
+                    </div>
+                    <div id="method-chart"></div>
+                </section>
+            </div>
+
+            <div class="col-6">
+                <section class="card" id="card-dept">
+                    <div class="timeline-header">
+                        <h2>Responsible Department</h2>
+                    </div>
+                    <div id="dept-chart"></div>
+                </section>
+            </div>
+
+            <div class="col-6">
+                <section class="card" id="card-priority-l3">
+                    <div class="timeline-header">
+                        <h2>Priority Level</h2>
+                    </div>
+                    <div id="priority-chart-l3"></div>
+                </section>
+            </div>
+
+        </div>
+
     </main>
 
-    <div id="tooltip" role="tooltip"></div>
+    <div id="tooltip"          role="tooltip"></div>
     <div id="timeline-tooltip" class="timeline-tooltip" role="tooltip" hidden></div>
 
     <script>
-      window.APP_CONFIG = window.APP_CONFIG || {};
+        window.APP_CONFIG = window.APP_CONFIG || {};
     </script>
 
     <script src="https://unpkg.com/@knadh/oat/oat.min.js"></script>
@@ -147,6 +230,7 @@
     <script src="js/leaflet-heat.js"></script>
     <script src="js/config.local.js"></script>
     <script src="js/leafletMap.js"></script>
+    <script src="js/level3Charts.js"></script>
     <script src="js/main.js"></script>
 
 </body>
