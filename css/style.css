@@ -94,9 +94,9 @@ main.app-shell {
 
 .controls-map-inner {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: flex-end;
-  justify-content: space-between;
+  justify-content: flex-start;
   gap: var(--space-3) var(--space-4);
 }
 
@@ -126,10 +126,70 @@ main.app-shell {
   max-width: min(100%, 20rem);
 }
 
+.field-service-types {
+  flex: 1 1 12rem;
+  max-width: min(100%, 20rem);
+}
+
+.multi-select-dropdown {
+  position: relative;
+}
+
+.multi-select-button {
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  background: var(--input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-medium);
+  color: var(--foreground);
+  font-size: var(--text-6);
+  text-align: left;
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.multi-select-button::after {
+  content: "▼";
+  font-size: 0.8em;
+  margin-left: var(--space-2);
+}
+
+.multi-select-options {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-medium);
+  box-shadow: var(--shadow-medium);
+  max-height: 200px;
+  overflow-y: auto;
+  z-index: 1000;
+}
+
+.multi-select-options label {
+  display: block;
+  padding: var(--space-2) var(--space-3);
+  cursor: pointer;
+  font-size: var(--text-6);
+}
+
+.multi-select-options label:hover {
+  background: var(--muted);
+}
+
+.multi-select-options input[type="checkbox"] {
+  margin-right: var(--space-2);
+}
+
 .controls-map menu.map-action-buttons {
   margin: 0;
   flex: 0 0 auto;
   flex-wrap: wrap;
+  margin-left: auto;
 }
 
 /* Data scope: inset panel + 3 equal columns (not one full-width column) */
@@ -209,6 +269,11 @@ main.app-shell {
 .filter-chip-neighborhood {
   border-color: rgb(37 99 235 / 28%);
   background: rgb(37 99 235 / 6%);
+}
+
+.filter-chip-service-type {
+  border-color: rgb(127 29 29 / 28%);
+  background: rgb(127 29 29 / 6%);
 }
 
 .filter-chip span:first-child {

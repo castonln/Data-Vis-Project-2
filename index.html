@@ -35,7 +35,19 @@
                                 <option value="neighborhood">Neighborhood</option>
                                 <option value="priority">Priority</option>
                                 <option value="deptName">Department</option>
+                                <option value="srType" selected>Service type</option>
                             </select>
+                        </div>
+                        <div class="field field-service-types">
+                            <label for="service-types-dropdown">Service types</label>
+                            <div class="multi-select-dropdown">
+                                <button id="service-types-toggle" type="button" class="multi-select-button">
+                                    Select service types…
+                                </button>
+                                <div id="service-types-options" class="multi-select-options" hidden>
+                                    <!-- Options will be populated by JS -->
+                                </div>
+                            </div>
                         </div>
                         <menu class="buttons map-action-buttons">
                             <li><button id="map-mode-toggle" type="button">Heatmap</button></li>
@@ -46,6 +58,7 @@
                             </li>
                         </menu>
                     </div>
+                    <div id="filter-chips" class="filter-chips" role="group" aria-label="Active filters" hidden></div>
                 </section>
 
                 <section class="controls-block controls-scope" aria-labelledby="controls-scope-title">
@@ -79,8 +92,7 @@
                             </select>
                         </div>
                     </div>
-                    <div id="filter-chips" class="filter-chips" role="group"
-                         aria-label="Active scope filters" hidden></div>
+                    <div id="filter-chips-scope" class="filter-chips" role="group" aria-label="Active scope filters" hidden></div>
                 </section>
 
             </div>

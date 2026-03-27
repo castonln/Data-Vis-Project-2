@@ -6,7 +6,8 @@ class LeafletMap {
       legendElement: _config.legendElement || "#legend",
       initialColorMode: _config.initialColorMode || "daysToUpdate",
       initialBasemap: _config.initialBasemap || "street",
-      initialMapMode: _config.initialMapMode || "points"
+      initialMapMode: _config.initialMapMode || "points",
+      targetServiceTypes: _config.targetServiceTypes || []
     };
 
     this.data = _data || [];
@@ -278,6 +279,35 @@ class LeafletMap {
       };
     } else if (mode === "neighborhood") {
       this.prepareCategoricalScale("neighborhood");
+    } else if (mode === "srType") {
+      const serviceTypeColors = new Map([
+        ["PTHOLE", "#e11d48"],    // Rose - Potholes
+        ["PLMB_DEF", "#0ea5e9"],  // Sky - Plumbing Defects
+        ["MTL-FRN", "#10b981"],  // Emerald - Metal Furniture
+        ["SEWAG_EX", "#f59e0b"], // Amber - Sewage Exposure
+        ["GRFITI", "#8b5cf6"],   // Violet - Graffiti
+        ["RCYCLNG", "#06b6d4"],  // Cyan - Recycling
+        ["Unknown", "#6b7280"]   // Gray - Unknown
+      ]);
+
+      const counts = d3.rollup(
+        this.mappedData,
+        values => values.length,
+        d => d.srType || "Unknown"
+      );
+
+      // Only include target service types in the legend
+      this.categoryItems = this.config.targetServiceTypes
+        .map(type => ({
+          value: type,
+          count: counts.get(type) || 0
+        }))
+        .sort((a, b) => d3.descending(a.count, b.count));
+
+      this.getColor = d => {
+        const key = d.srType || "Unknown";
+        return serviceTypeColors.get(key) || "#64748b";
+      };
     } else {
       this.prepareCategoricalScale("deptName");
     }
@@ -528,13 +558,21 @@ class LeafletMap {
 
     vis.categoryItems.forEach(item => {
       const row = list.append("li").attr("class", "legend-item");
-      row.append("span")
-        .attr("class", "legend-swatch")
-        .style("background-color", vis.getColor({
+      
+      let colorValue;
+      if (vis.colorMode === "srType") {
+        colorValue = { srType: item.value };
+      } else {
+        colorValue = {
           priority: item.value,
           neighborhood: item.value,
           deptName: item.value
-        }));
+        };
+      }
+      
+      row.append("span")
+        .attr("class", "legend-swatch")
+        .style("background-color", vis.getColor(colorValue));
 
       row.append("span")
         .attr("class", "legend-label")
