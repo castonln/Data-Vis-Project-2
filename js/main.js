@@ -15,8 +15,9 @@ const SOCRATA_APP_TOKEN = usableSocrataAppToken(APP_CONFIG.SOCRATA_APP_TOKEN);
 let omitSocrataAppToken = false;
 
 const DATASET_ID = "gcej-gmiw";
-const TARGET_SERVICE_TYPE = "PTHOLE";
-// Pothole (PTHOLE) requests: API coverage ~2004–2026 (2026 partial).
+// Predefined list of service types to show on the map and in the dropdown
+const TARGET_SERVICE_TYPES = ["PTHOLE", "PLMB_DEF", "MTL-FRN", "SEWAG_EX", "GRFITI", "RCYCLNG"];
+// Service type requests: API coverage ~2004–2026 (2026 partial).
 const DATE_RANGE_START = "2004-01-01T00:00:00.000";
 const DATE_RANGE_END = "2026-12-31T23:59:59.999";
 /** Socrata SODA defaults to 1,000 rows per request; without paging you only get recent rows (e.g. one year). */
@@ -45,6 +46,8 @@ let filterDepartment = "";
 /** Empty array = all neighborhoods */
 let filterNeighborhoods = [];
 let filterPriority = "";
+/** Empty array = all service types */
+let filterServiceTypes = ["PTHOLE", "PLMB_DEF", "MTL-FRN", "SEWAG_EX"];
 let dataSourceLabel = "Unknown";
 let dataWarningMessage = "";
 
@@ -172,7 +175,7 @@ async function requestSocrataCsv(url) {
 
 async function fetchAllSocrataRecords() {
   omitSocrataAppToken = false;
-  const whereClause = `sr_type='${TARGET_SERVICE_TYPE}' AND date_created between '${DATE_RANGE_START}' and '${DATE_RANGE_END}'`;
+  const whereClause = `date_created between '${DATE_RANGE_START}' and '${DATE_RANGE_END}'`;
   const allRows = [];
   let offset = 0;
   const maxPages = 50;
@@ -198,24 +201,70 @@ async function fetchAllSocrataRecords() {
   return allRows;
 }
 
-function isPotholeFromCsv(record) {
-  const type = getValue(record, ["SR_TYPE", "sr_type"]) || "";
-  const typeDesc = getValue(record, ["SR_TYPE_DESC", "sr_type_desc"]) || "";
-  return type.toUpperCase() === TARGET_SERVICE_TYPE || typeDesc.toUpperCase().includes("POTHOLE");
+function populateServiceTypesDropdown() {
+  const el = document.getElementById("service-types-options");
+  if (!el) return;
+  
+  el.innerHTML = "";
+  
+  TARGET_SERVICE_TYPES.forEach(type => {
+    const label = document.createElement("label");
+    
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.value = type;
+    checkbox.checked = filterServiceTypes.includes(type);
+    checkbox.addEventListener("change", () => {
+      if (checkbox.checked) {
+        if (!filterServiceTypes.includes(type)) {
+          filterServiceTypes.push(type);
+        }
+      } else {
+        filterServiceTypes = filterServiceTypes.filter(t => t !== type);
+      }
+      updateServiceTypesButtonText();
+      applyFilters();
+    });
+    
+    label.appendChild(checkbox);
+    const text = document.createElement("span");
+    text.textContent = type;
+    label.appendChild(text);
+    el.appendChild(label);
+  });
+}
+
+function updateServiceTypesButtonText() {
+  const btn = document.getElementById("service-types-toggle");
+  if (!btn) return;
+  
+  if (filterServiceTypes.length === 0) {
+    btn.textContent = "Select service types…";
+  } else if (filterServiceTypes.length === TARGET_SERVICE_TYPES.length) {
+    btn.textContent = `All ${TARGET_SERVICE_TYPES.length} types`;
+  } else if (filterServiceTypes.length === 1) {
+    btn.textContent = filterServiceTypes[0];
+  } else {
+    btn.textContent = `${filterServiceTypes.length} selected`;
+  }
 }
 
 async function fetchFallbackCsv() {
   const csvData = await d3.csv("data/311Sample.csv");
-  return csvData.filter(record => isPotholeFromCsv(record));
+  return csvData;
 }
 
 async function loadRecords() {
   try {
     const liveRecords = await fetchAllSocrataRecords();
+    let normalized = normalizeAll(liveRecords);
+    // Filter to only include target service types
+    const targetSt = new Set(TARGET_SERVICE_TYPES);
+    normalized = normalized.filter(r => r.srType && targetSt.has(r.srType));
     return {
       sourceLabel: "Live API",
       warningMessage: "",
-      records: normalizeAll(liveRecords)
+      records: normalized
     };
   } catch (error) {
     console.warn("Live API failed. Falling back to local CSV.", error);
@@ -235,10 +284,14 @@ async function loadRecords() {
       detail += reason;
     }
     const fallbackRecords = await fetchFallbackCsv();
+    let normalized = normalizeAll(fallbackRecords);
+    // Filter to only include target service types
+    const targetSt = new Set(TARGET_SERVICE_TYPES);
+    normalized = normalized.filter(r => r.srType && targetSt.has(r.srType));
     return {
       sourceLabel: "Fallback sample CSV",
       warningMessage: `Live API did not load. ${detail} Showing local sample CSV instead.`,
-      records: normalizeAll(fallbackRecords)
+      records: normalized
     };
   }
 }
@@ -308,44 +361,71 @@ function fillSelectOptions(selectId, values, allLabel) {
 }
 
 function renderFilterChips() {
-  const el = document.getElementById("filter-chips");
-  if (!el) return;
+  // Render scope filters (Department, Neighborhood, Priority)
+  const scopeEl = document.getElementById("filter-chips-scope");
+  if (scopeEl) {
+    const scopeItems = [];
+    if (filterDepartment) scopeItems.push({ field: "filterDepartment", label: "Dept", value: filterDepartment });
+    filterNeighborhoods.forEach(n => {
+      scopeItems.push({ field: "filterNeighborhood", label: "Area", value: n, filterValue: n });
+    });
+    if (filterPriority) scopeItems.push({ field: "filterPriority", label: "Priority", value: filterPriority });
 
-  const items = [];
-  if (filterDepartment) items.push({ field: "filterDepartment", label: "Dept", value: filterDepartment });
-  filterNeighborhoods.forEach(n => {
-    items.push({ field: "filterNeighborhood", label: "Area", value: n, filterValue: n });
-  });
-  if (filterPriority) items.push({ field: "filterPriority", label: "Priority", value: filterPriority });
-
-  el.innerHTML = "";
-  if (items.length === 0) {
-    el.hidden = true;
-    return;
+    scopeEl.innerHTML = "";
+    if (scopeItems.length === 0) {
+      scopeEl.hidden = true;
+    } else {
+      scopeEl.hidden = false;
+      scopeItems.forEach(({ field, label, value, filterValue }) => {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = field === "filterNeighborhood" ? "filter-chip filter-chip-neighborhood" : "filter-chip";
+        btn.dataset.filterField = field;
+        if (field === "filterNeighborhood" && filterValue !== undefined) {
+          btn.dataset.filterValue = filterValue;
+        }
+        btn.setAttribute(
+          "aria-label",
+          field === "filterNeighborhood" ? `Remove neighborhood: ${value}` : `Remove ${label} filter: ${value}`
+        );
+        const span = document.createElement("span");
+        span.textContent = field === "filterNeighborhood" ? value : `${label}: ${value}`;
+        const x = document.createElement("span");
+        x.className = "filter-chip-x";
+        x.setAttribute("aria-hidden", "true");
+        x.textContent = "×";
+        btn.append(span, x);
+        scopeEl.appendChild(btn);
+      });
+    }
   }
 
-  el.hidden = false;
-  items.forEach(({ field, label, value, filterValue }) => {
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = field === "filterNeighborhood" ? "filter-chip filter-chip-neighborhood" : "filter-chip";
-    btn.dataset.filterField = field;
-    if (field === "filterNeighborhood" && filterValue !== undefined) {
-      btn.dataset.filterValue = filterValue;
+  // Render service type filters
+  const stEl = document.getElementById("filter-chips");
+  if (stEl) {
+    stEl.innerHTML = "";
+    if (filterServiceTypes.length === 0) {
+      stEl.hidden = true;
+    } else {
+      stEl.hidden = false;
+      filterServiceTypes.forEach(st => {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "filter-chip filter-chip-service-type";
+        btn.dataset.filterField = "filterServiceType";
+        btn.dataset.filterValue = st;
+        btn.setAttribute("aria-label", `Remove service type: ${st}`);
+        const span = document.createElement("span");
+        span.textContent = st;
+        const x = document.createElement("span");
+        x.className = "filter-chip-x";
+        x.setAttribute("aria-hidden", "true");
+        x.textContent = "×";
+        btn.append(span, x);
+        stEl.appendChild(btn);
+      });
     }
-    btn.setAttribute(
-      "aria-label",
-      field === "filterNeighborhood" ? `Remove neighborhood: ${value}` : `Remove ${label} filter: ${value}`
-    );
-    const span = document.createElement("span");
-    span.textContent = field === "filterNeighborhood" ? value : `${label}: ${value}`;
-    const x = document.createElement("span");
-    x.className = "filter-chip-x";
-    x.setAttribute("aria-hidden", "true");
-    x.textContent = "×";
-    btn.append(span, x);
-    el.appendChild(btn);
-  });
+  }
 }
 
 function populateFilterSelects() {
@@ -706,6 +786,11 @@ function renderTimeline(records) {
 function applyFilters() {
   let next = allRecords.slice();
 
+  if (filterServiceTypes.length > 0) {
+    const st = new Set(filterServiceTypes);
+    next = next.filter(r => st.has(r.srType));
+  }
+
   const timelineYearEl = document.getElementById("timeline-year");
   const timelineYear = timelineYearEl && timelineYearEl.value ? timelineYearEl.value.trim() : "";
   if (timelineYear) {
@@ -761,6 +846,24 @@ function wireUiEvents() {
       leafletMapInstance.setColorMode(event.target.value);
     }
   });
+
+  const serviceTypesToggle = document.getElementById("service-types-toggle");
+  const serviceTypesOptions = document.getElementById("service-types-options");
+  if (serviceTypesToggle && serviceTypesOptions) {
+    serviceTypesToggle.addEventListener("click", () => {
+      const isHidden = serviceTypesOptions.hidden;
+      serviceTypesOptions.hidden = !isHidden;
+      serviceTypesToggle.setAttribute("aria-expanded", !isHidden);
+    });
+
+    // Close dropdown when clicking outside
+    document.addEventListener("click", event => {
+      if (!serviceTypesToggle.contains(event.target) && !serviceTypesOptions.contains(event.target)) {
+        serviceTypesOptions.hidden = true;
+        serviceTypesToggle.setAttribute("aria-expanded", "false");
+      }
+    });
+  }
 
   if (!leafletMapInstance.cycleLayer) {
     basemapToggleButton.disabled = true;
@@ -840,32 +943,47 @@ function wireUiEvents() {
       filterDepartment = "";
       filterNeighborhoods = [];
       filterPriority = "";
+      filterServiceTypes = [...TARGET_SERVICE_TYPES];
       if (filterDept) filterDept.value = "";
       if (filterPriorityEl) filterPriorityEl.value = "";
       populateNeighborhoodDropdown();
+      populateServiceTypesDropdown();
+      updateServiceTypesButtonText();
       applyFilters();
     });
   }
 
   const filterChipsEl = document.getElementById("filter-chips");
+  const filterChipsScopeEl = document.getElementById("filter-chips-scope");
+  
+  const handleChipClick = (event) => {
+    const chip = event.target.closest(".filter-chip");
+    if (!chip || !chip.dataset.filterField) return;
+    const field = chip.dataset.filterField;
+    if (field === "filterDepartment") {
+      filterDepartment = "";
+      if (filterDept) filterDept.value = "";
+    } else if (field === "filterNeighborhood" && chip.dataset.filterValue) {
+      const v = chip.dataset.filterValue;
+      filterNeighborhoods = filterNeighborhoods.filter(n => n !== v);
+      populateNeighborhoodDropdown();
+    } else if (field === "filterPriority") {
+      filterPriority = "";
+      if (filterPriorityEl) filterPriorityEl.value = "";
+    } else if (field === "filterServiceType" && chip.dataset.filterValue) {
+      const v = chip.dataset.filterValue;
+      filterServiceTypes = filterServiceTypes.filter(st => st !== v);
+      populateServiceTypesDropdown();
+      updateServiceTypesButtonText();
+    }
+    applyFilters();
+  };
+
   if (filterChipsEl) {
-    filterChipsEl.addEventListener("click", event => {
-      const chip = event.target.closest(".filter-chip");
-      if (!chip || !chip.dataset.filterField) return;
-      const field = chip.dataset.filterField;
-      if (field === "filterDepartment") {
-        filterDepartment = "";
-        if (filterDept) filterDept.value = "";
-      } else if (field === "filterNeighborhood" && chip.dataset.filterValue) {
-        const v = chip.dataset.filterValue;
-        filterNeighborhoods = filterNeighborhoods.filter(n => n !== v);
-        populateNeighborhoodDropdown();
-      } else if (field === "filterPriority") {
-        filterPriority = "";
-        if (filterPriorityEl) filterPriorityEl.value = "";
-      }
-      applyFilters();
-    });
+    filterChipsEl.addEventListener("click", handleChipClick);
+  }
+  if (filterChipsScopeEl) {
+    filterChipsScopeEl.addEventListener("click", handleChipClick);
   }
 }
 
@@ -877,15 +995,18 @@ async function initializeApp() {
 
   allRecords = dataset.records.slice();
   filteredRecords = allRecords.slice();
+  // Initialize with predefined service types selected
+  filterServiceTypes = [...TARGET_SERVICE_TYPES];
 
   leafletMapInstance = new LeafletMap(
     {
       parentElement: "#my-map",
       tooltipElement: "#tooltip",
       legendElement: "#legend",
-      initialColorMode: "daysToUpdate",
+      initialColorMode: "srType",
       initialBasemap: "street",
-      initialMapMode: "points"
+      initialMapMode: "points",
+      targetServiceTypes: TARGET_SERVICE_TYPES
     },
     filteredRecords
   );
@@ -898,6 +1019,8 @@ async function initializeApp() {
   }
 
   populateFilterSelects();
+  populateServiceTypesDropdown();
+  updateServiceTypesButtonText();
   populateTimelineYearSelect();
   renderTimeline(allRecords);
   updateSummaryCharts();
