@@ -187,9 +187,18 @@ main.app-shell {
 
 .controls-map menu.map-action-buttons {
   margin: 0;
-  flex: 0 0 auto;
+  padding: 0;
+  list-style: none;
+  display: flex;
   flex-wrap: wrap;
-  margin-left: auto;
+  gap: var(--space-2);
+  align-items: center;
+  flex: 0 0 auto;
+}
+
+.controls-map menu.map-action-buttons li {
+  list-style: none;
+  margin: 0;
 }
 
 /* Data scope: inset panel + 3 equal columns (not one full-width column) */
@@ -383,6 +392,82 @@ menu.timeline-actions {
 
 .map-card {
   padding: var(--space-2);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+/* Map selection — always directly above the map so it is easy to find */
+.map-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3) var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  background: linear-gradient(180deg, var(--muted) 0%, var(--faint) 100%);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-medium);
+}
+
+.map-toolbar-text {
+  flex: 1 1 16rem;
+  min-width: 0;
+}
+
+.map-toolbar-title {
+  display: block;
+  font-size: var(--text-6);
+  font-weight: var(--font-semibold);
+  color: var(--foreground);
+  margin-bottom: var(--space-2);
+}
+
+.map-toolbar-hint {
+  margin: 0;
+  font-size: var(--text-7);
+  color: var(--text-secondary);
+  line-height: 1.45;
+  max-width: 52ch;
+}
+
+.map-toolbar-hint kbd {
+  font-family: var(--font-sans);
+  font-size: 0.85em;
+  padding: 0.1em 0.35em;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-small);
+  background: var(--card);
+}
+
+.map-toolbar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.map-toolbar-btn-primary {
+  font-weight: var(--font-semibold);
+  border-color: var(--primary) !important;
+  color: var(--primary) !important;
+}
+
+.map-toolbar-btn-primary:hover:not(:disabled) {
+  background: rgb(37 99 235 / 8%) !important;
+}
+
+@media (max-width: 560px) {
+  .map-toolbar-actions {
+    width: 100%;
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .map-toolbar-actions button {
+    width: 100%;
+  }
 }
 
 #my-map {
@@ -391,6 +476,10 @@ menu.timeline-actions {
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-medium);
   background: var(--muted);
+}
+
+#my-map.map-brush-mode {
+  cursor: crosshair;
 }
 
 .leaflet-container .leaflet-pane > canvas,

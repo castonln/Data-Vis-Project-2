@@ -129,6 +129,29 @@
 
         <section class="dashboard-grid">
             <article class="card map-card">
+                <div class="map-toolbar" role="toolbar" aria-label="Map selection tools">
+                    <div class="map-toolbar-text">
+                        <strong class="map-toolbar-title">Select on the map</strong>
+                        <p class="map-toolbar-hint">
+                            Click <strong>Draw region</strong>, then drag a rectangle on the map.
+                            Everything below (timeline and charts) filters to points inside the box.
+                            Press <kbd>Esc</kbd> to cancel drawing.
+                        </p>
+                    </div>
+                    <div class="map-toolbar-actions">
+                        <button id="map-draw-region" type="button" data-variant="secondary"
+                                class="outline map-toolbar-btn-primary"
+                                aria-pressed="false"
+                                title="Then drag on the map to draw a rectangle filter">
+                            Draw region
+                        </button>
+                        <button id="map-clear-region" type="button" data-variant="secondary"
+                                class="outline" disabled
+                                title="Remove the rectangle and show all points again">
+                            Clear map region
+                        </button>
+                    </div>
+                </div>
                 <div id="my-map" aria-label="Pothole service request map"></div>
             </article>
 
@@ -160,6 +183,8 @@
                         <span id="map-mode-label">Points</span></p>
                     <p><strong>Active date range:</strong>
                         <span id="active-range">All dates</span></p>
+                    <p><strong>Map region filter:</strong>
+                        <span id="map-region-status">None</span></p>
                     <p><strong>Attribute filters:</strong>
                         <span id="active-filters">None</span></p>
                 </section>

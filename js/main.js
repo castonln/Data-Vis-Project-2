@@ -38,6 +38,7 @@ let leafletMapInstance = null;
 let allRecords         = [];
 let filteredRecords    = [];
 let activeBrushRange   = null;
+let mapSelectionBounds = null;
 
 let filterDepartment     = "";
 let filterNeighborhoods  = [];
@@ -465,6 +466,26 @@ function updateStatusPanel() {
   const attrEl = document.getElementById("active-filters");
   if (attrEl) attrEl.textContent = attrParts.length ? attrParts.join(" · ") : "None";
 
+  const mapRegionEl = document.getElementById("map-region-status");
+  if (mapRegionEl) {
+    mapRegionEl.textContent = mapSelectionBounds ? "Rectangle on map (see outline)" : "None";
+  }
+
+  const mapDrawBtn = document.getElementById("map-draw-region");
+  if (mapDrawBtn && leafletMapInstance) {
+    const heatMode = leafletMapInstance.activeMapMode === "heat";
+    mapDrawBtn.disabled = heatMode;
+    mapDrawBtn.title = heatMode ? "Switch to Points mode to draw a map region." : "";
+    const active = leafletMapInstance.brushModeActive;
+    mapDrawBtn.setAttribute("aria-pressed", active ? "true" : "false");
+    mapDrawBtn.textContent = active ? "Drawing… (drag on map)" : "Draw region";
+  }
+
+  const mapClearBtn = document.getElementById("map-clear-region");
+  if (mapClearBtn) {
+    mapClearBtn.disabled = !mapSelectionBounds;
+  }
+
   renderFilterChips();
 
   const warningEl = document.getElementById("data-warning");
@@ -795,6 +816,13 @@ function applyFilters() {
   if (filterPriority)          next = next.filter(r => r.priority       === filterPriority);
   if (filterMethodReceived)    next = next.filter(r => r.methodReceived  === filterMethodReceived);
 
+  if (mapSelectionBounds) {
+    next = next.filter(r => {
+      if (r.latitude == null || r.longitude == null) return false;
+      return mapSelectionBounds.contains(L.latLng(r.latitude, r.longitude));
+    });
+  }
+
   filteredRecords = next;
 
   if (leafletMapInstance) leafletMapInstance.setFilteredData(filteredRecords);
@@ -906,8 +934,39 @@ function wireUiEvents() {
   mapModeToggleButton.addEventListener("click", () => {
     if (!leafletMapInstance || !leafletMapInstance.heatLayer) return;
     const nextMode   = leafletMapInstance.activeMapMode === "points" ? "heat" : "points";
-    leafletMapInstance.setMapMode(nextMode);
-    syncMapModeControls();
+    const activeMode = leafletMapInstance.setMapMode(nextMode);
+    const isPoints   = activeMode === "points";
+    mapModeToggleButton.textContent = isPoints ? "Heatmap" : "Points";
+    document.getElementById("map-mode-label").textContent = isPoints ? "Points" : "Heatmap";
+    colorModeSelect.disabled = !isPoints;
+    updateStatusPanel();
+  });
+
+  const mapDrawRegionBtn = document.getElementById("map-draw-region");
+  if (mapDrawRegionBtn && leafletMapInstance) {
+    mapDrawRegionBtn.addEventListener("click", () => {
+      if (!leafletMapInstance) return;
+      if (leafletMapInstance.activeMapMode !== "points") return;
+      if (leafletMapInstance.brushModeActive) {
+        leafletMapInstance.cancelBrushMode();
+      } else {
+        leafletMapInstance.setBrushMode(true);
+      }
+    });
+  }
+
+  const mapClearRegionBtn = document.getElementById("map-clear-region");
+  if (mapClearRegionBtn && leafletMapInstance) {
+    mapClearRegionBtn.addEventListener("click", () => {
+      if (!leafletMapInstance) return;
+      leafletMapInstance.clearSpatialSelection();
+    });
+  }
+
+  document.addEventListener("keydown", event => {
+    if (event.key !== "Escape") return;
+    if (!leafletMapInstance || !leafletMapInstance.brushModeActive) return;
+    leafletMapInstance.cancelBrushMode();
   });
 
   clearBrushButton.addEventListener("click", () => {
@@ -1039,13 +1098,19 @@ async function initializeApp() {
 
   leafletMapInstance = new LeafletMap(
     {
-      parentElement: "#my-map",
-      tooltipElement: "#tooltip",
-      legendElement: "#legend",
-      initialColorMode: "srType",
-      initialBasemap: "street",
-      initialMapMode: "heat",
-      targetServiceTypes: TARGET_SERVICE_TYPES
+      parentElement:    "#my-map",
+      tooltipElement:   "#tooltip",
+      legendElement:    "#legend",
+      initialColorMode: "daysToUpdate",
+      initialBasemap:   "street",
+      initialMapMode:   "points",
+      onMapSelectionChange(bounds) {
+        mapSelectionBounds = bounds;
+        applyFilters();
+      },
+      onBrushSessionEnd() {
+        updateStatusPanel();
+      }
     },
     filteredRecords
   );

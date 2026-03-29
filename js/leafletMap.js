@@ -7,8 +7,17 @@ class LeafletMap {
       initialColorMode: _config.initialColorMode || "daysToUpdate",
       initialBasemap: _config.initialBasemap || "street",
       initialMapMode: _config.initialMapMode || "points",
-      targetServiceTypes: _config.targetServiceTypes || []
+      onMapSelectionChange:
+        typeof _config.onMapSelectionChange === "function" ? _config.onMapSelectionChange : () => {},
+      onBrushSessionEnd:
+        typeof _config.onBrushSessionEnd === "function" ? _config.onBrushSessionEnd : () => {}
     };
+
+    this.brushModeActive = false;
+    this.selectionRect = null;
+    this._brushStartLatLng = null;
+    this._previewRect = null;
+    this._brushDocHandlers = null;
 
     this.data = _data || [];
     this.filteredData = this.data.slice();
@@ -78,8 +87,8 @@ class LeafletMap {
     L.svg({ clickable: true }).addTo(vis.theMap);
 
     vis.overlay = d3.select(vis.theMap.getPanes().overlayPane);
-    vis.svg = vis.overlay.select("svg").attr("pointer-events", "auto");
-    vis.pointLayer = vis.svg.append("g").attr("class", "map-points-layer");
+    vis.svg = vis.overlay.select("svg");
+    vis.setSvgPointerEventsForInteraction();
 
     // Keep the heat surface below the SVG overlay so interaction targets stay available.
     const heatPane = vis.theMap.createPane("heatmap");
@@ -116,6 +125,143 @@ class LeafletMap {
       vis.theMap.fitBounds(bounds.pad(0.05));
       vis.initialBoundsApplied = true;
     }
+
+    vis._installMapBrush();
+  }
+
+  _getMapContainerEl() {
+    return document.getElementById(this.config.parentElement.replace("#", ""));
+  }
+
+  _setBrushCursor(on) {
+    const el = this._getMapContainerEl();
+    if (el) el.classList.toggle("map-brush-mode", on);
+  }
+
+  setSvgPointerEventsForInteraction() {
+    const pointsVisible = this.activeMapMode === "points";
+    const allowPoints = pointsVisible && !this.brushModeActive;
+    this.svg.attr("pointer-events", allowPoints ? "auto" : "none");
+  }
+
+  _cancelBrushDrag() {
+    const map = this.theMap;
+    if (this._brushDocHandlers) {
+      document.removeEventListener("mousemove", this._brushDocHandlers.move);
+      document.removeEventListener("mouseup", this._brushDocHandlers.up);
+      this._brushDocHandlers = null;
+    }
+    if (this._previewRect) {
+      map.removeLayer(this._previewRect);
+      this._previewRect = null;
+    }
+    this._brushStartLatLng = null;
+    map.dragging.enable();
+  }
+
+  cancelBrushMode() {
+    const wasActive = this.brushModeActive || this._brushStartLatLng;
+    this.brushModeActive = false;
+    this._cancelBrushDrag();
+    this._setBrushCursor(false);
+    this.setSvgPointerEventsForInteraction();
+    if (wasActive) this.config.onBrushSessionEnd();
+  }
+
+  setBrushMode(enabled) {
+    if (!enabled) {
+      this.cancelBrushMode();
+      return;
+    }
+    this.brushModeActive = true;
+    this._setBrushCursor(true);
+    this.setSvgPointerEventsForInteraction();
+    this.config.onBrushSessionEnd();
+  }
+
+  applySpatialSelection(bounds) {
+    if (this.selectionRect) {
+      this.theMap.removeLayer(this.selectionRect);
+    }
+    this.selectionRect = L.rectangle(bounds, {
+      color: "#2563eb",
+      weight: 2,
+      fillOpacity: 0.08,
+      interactive: false
+    }).addTo(this.theMap);
+    this.config.onMapSelectionChange(bounds);
+  }
+
+  clearSpatialSelection() {
+    this.cancelBrushMode();
+    if (this.selectionRect) {
+      this.theMap.removeLayer(this.selectionRect);
+      this.selectionRect = null;
+    }
+    this.config.onMapSelectionChange(null);
+  }
+
+  _installMapBrush() {
+    const vis = this;
+    const map = vis.theMap;
+    const container = map.getContainer();
+
+    const onDown = e => {
+      if (!vis.brushModeActive || e.button !== 0) return;
+      L.DomEvent.preventDefault(e);
+      L.DomEvent.stop(e);
+      map.dragging.disable();
+      vis._brushStartLatLng = map.mouseEventToLatLng(e);
+      vis._previewRect = L.rectangle([vis._brushStartLatLng, vis._brushStartLatLng], {
+        color: "#2563eb",
+        weight: 2,
+        fillOpacity: 0.14,
+        interactive: false
+      }).addTo(map);
+
+      const onMove = moveEv => {
+        if (!vis._brushStartLatLng || !vis._previewRect) return;
+        const cur = map.mouseEventToLatLng(moveEv);
+        vis._previewRect.setBounds(L.latLngBounds(vis._brushStartLatLng, cur));
+      };
+
+      const onUp = upEv => {
+        document.removeEventListener("mousemove", onMove);
+        document.removeEventListener("mouseup", onUp);
+        vis._brushDocHandlers = null;
+
+        const start = vis._brushStartLatLng;
+        if (vis._previewRect) {
+          map.removeLayer(vis._previewRect);
+          vis._previewRect = null;
+        }
+        vis._brushStartLatLng = null;
+        map.dragging.enable();
+
+        if (!start) return;
+
+        const cur = map.mouseEventToLatLng(upEv);
+        const b = L.latLngBounds(start, cur);
+
+        vis.brushModeActive = false;
+        vis._setBrushCursor(false);
+        vis.setSvgPointerEventsForInteraction();
+
+        const nw = map.latLngToContainerPoint(b.getNorthWest());
+        const se = map.latLngToContainerPoint(b.getSouthEast());
+        if (Math.abs(nw.x - se.x) < 5 && Math.abs(nw.y - se.y) < 5) {
+          vis.config.onBrushSessionEnd();
+          return;
+        }
+
+        vis.applySpatialSelection(b);
+      };
+
+      vis._brushDocHandlers = { move: onMove, up: onUp };
+      document.addEventListener("mousemove", onMove);
+      document.addEventListener("mouseup", onUp);
+    };
+    container.addEventListener("mousedown", onDown, true);
   }
 
   /** Limit SVG points so pan/zoom stays responsive (full data still drives legend scales). */
@@ -671,6 +817,13 @@ class LeafletMap {
       this.activeMapMode = mode;
     }
 
+    if (this.activeMapMode === "heat") {
+      this.cancelBrushMode();
+    }
+
+    const showPoints = this.activeMapMode === "points";
+    this.svg.style("display", showPoints ? "block" : "none");
+
     if (this.heatLayer) {
       if (this.activeMapMode === "heat") {
         this.heatLayer.addTo(this.theMap);
@@ -686,7 +839,7 @@ class LeafletMap {
       }
     }
 
-    this.syncPointModeAppearance();
+    this.setSvgPointerEventsForInteraction();
     this.renderLegend();
     return this.activeMapMode;
   }
