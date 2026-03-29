@@ -79,10 +79,11 @@ class LeafletMap {
 
     vis.overlay = d3.select(vis.theMap.getPanes().overlayPane);
     vis.svg = vis.overlay.select("svg").attr("pointer-events", "auto");
+    vis.pointLayer = vis.svg.append("g").attr("class", "map-points-layer");
 
-    // Dedicated pane above overlay (400) so heat is never painted under the D3 SVG.
+    // Keep the heat surface below the SVG overlay so interaction targets stay available.
     const heatPane = vis.theMap.createPane("heatmap");
-    heatPane.style.zIndex = 450;
+    heatPane.style.zIndex = 350;
 
     if (typeof L.heatLayer === "function") {
       vis.heatLayer = L.heatLayer([], {
@@ -319,25 +320,25 @@ class LeafletMap {
   updatePointLayer() {
     const vis = this;
 
-    vis.Dots = vis.svg.selectAll("circle")
+    vis.Dots = vis.pointLayer.selectAll("circle")
       .data(vis.mappedDataDisplay, d => d.srNumber)
       .join(
         enter => enter.append("circle")
           .attr("class", "map-point")
           .attr("stroke", "#1e293b")
-          .attr("stroke-width", 0.75)
-          .attr("fill-opacity", 0.85)
-          .attr("r", 4)
           .attr("cx", d => vis.theMap.latLngToLayerPoint([d.latitude, d.longitude]).x)
           .attr("cy", d => vis.theMap.latLngToLayerPoint([d.latitude, d.longitude]).y)
           .attr("fill", d => vis.getColor(d))
+          .style("pointer-events", "all")
           .on("mouseover", function(event, d) {
             d3.select(this)
               .raise()
+              .interrupt()
               .transition()
               .duration(120)
-              .attr("r", 6)
+              .attr("r", Math.max(vis.getPointRadius() + 2, 6))
               .attr("stroke-width", 1.2)
+              .attr("stroke-opacity", 0.95)
               .attr("fill-opacity", 1);
 
             vis.tooltip
@@ -351,12 +352,15 @@ class LeafletMap {
               .style("top", `${event.pageY + 12}px`);
           })
           .on("mouseleave", function() {
+            const appearance = vis.getPointAppearance();
             d3.select(this)
+              .interrupt()
               .transition()
               .duration(120)
-              .attr("r", 4)
-              .attr("stroke-width", 0.75)
-              .attr("fill-opacity", 0.85);
+              .attr("r", appearance.radius)
+              .attr("stroke-width", appearance.strokeWidth)
+              .attr("stroke-opacity", appearance.strokeOpacity)
+              .attr("fill-opacity", appearance.fillOpacity);
 
             vis.tooltip.style("opacity", 0);
           }),
@@ -364,20 +368,38 @@ class LeafletMap {
         exit => exit.remove()
       );
 
+    vis.syncPointModeAppearance();
     vis.updateVis();
+  }
+
+  aggregateHeatPoints() {
+    const roundedPointGroups = d3.rollups(
+      this.mappedData,
+      values => ({
+        latitude: d3.mean(values, d => d.latitude),
+        longitude: d3.mean(values, d => d.longitude),
+        count: values.length
+      }),
+      d => `${d.latitude.toFixed(5)}|${d.longitude.toFixed(5)}`
+    );
+
+    return roundedPointGroups.map(([, summary]) => summary);
   }
 
   updateHeatLayer() {
     if (!this.heatLayer) return;
-    const n = this.mappedData.length;
-    const heatMax = n === 0 ? 1 : Math.max(4, Math.min(280, Math.ceil(n / 40)));
+
+    let aggregatedPoints = this.aggregateHeatPoints();
+    const heatMax = Math.max(1, d3.max(aggregatedPoints, d => d.count) || 1);
     this.heatLayer.setOptions({ max: heatMax });
+
     const HEAT_CAP = 28000;
-    let heatPoints = this.mappedData.map(d => [d.latitude, d.longitude]);
-    if (heatPoints.length > HEAT_CAP) {
-      const step = Math.ceil(heatPoints.length / HEAT_CAP);
-      heatPoints = heatPoints.filter((_, i) => i % step === 0);
+    if (aggregatedPoints.length > HEAT_CAP) {
+      const step = Math.ceil(aggregatedPoints.length / HEAT_CAP);
+      aggregatedPoints = aggregatedPoints.filter((_, i) => i % step === 0);
     }
+
+    const heatPoints = aggregatedPoints.map(d => [d.latitude, d.longitude, d.count]);
     this.heatLayer.setLatLngs(heatPoints);
     this.ensureHeatCanvasVisible();
   }
@@ -412,14 +434,53 @@ class LeafletMap {
     this.Dots.attr("fill", d => this.getColor(d));
   }
 
+  getPointRadius() {
+    return Math.max(3.5, Math.min(7, this.theMap.getZoom() * 0.5 - 1));
+  }
+
+  getPointAppearance() {
+    if (this.activeMapMode === "heat") {
+      return {
+        radius: Math.max(this.getPointRadius(), 4.5),
+        strokeWidth: 0.9,
+        fillOpacity: 0.08,
+        strokeOpacity: 0.2
+      };
+    }
+
+    return {
+      radius: this.getPointRadius(),
+      strokeWidth: 0.75,
+      fillOpacity: 0.85,
+      strokeOpacity: 1
+    };
+  }
+
+  syncPointModeAppearance() {
+    if (!this.Dots) return;
+
+    const appearance = this.getPointAppearance();
+    this.svg.style("display", "block");
+    this.Dots
+      .style("pointer-events", "all")
+      .attr("r", appearance.radius)
+      .attr("stroke-width", appearance.strokeWidth)
+      .attr("stroke-opacity", appearance.strokeOpacity)
+      .attr("fill-opacity", appearance.fillOpacity)
+      .attr("fill", d => this.getColor(d));
+  }
+
   updateVis() {
     if (!this.Dots) return;
-    const radius = Math.max(3.5, Math.min(7, this.theMap.getZoom() * 0.5 - 1));
+    const appearance = this.getPointAppearance();
 
     this.Dots
       .attr("cx", d => this.theMap.latLngToLayerPoint([d.latitude, d.longitude]).x)
       .attr("cy", d => this.theMap.latLngToLayerPoint([d.latitude, d.longitude]).y)
-      .attr("r", radius)
+      .attr("r", appearance.radius)
+      .attr("stroke-width", appearance.strokeWidth)
+      .attr("stroke-opacity", appearance.strokeOpacity)
+      .attr("fill-opacity", appearance.fillOpacity)
       .attr("fill", d => this.getColor(d));
   }
 
@@ -476,7 +537,21 @@ class LeafletMap {
     vis.legendContainer
       .append("p")
       .attr("class", "legend-note")
-      .text("Heatmap intensity shows local concentration of requests.");
+      .text("Heatmap intensity shows aggregated local concentration of requests.");
+
+    if (vis.mappedData.length > vis.mappedDataDisplay.length) {
+      vis.legendContainer
+        .append("p")
+        .attr("class", "legend-note")
+        .text(
+          `Heat intensity uses all ${vis.mappedData.length.toLocaleString()} mapped requests. Hover inspection uses a ${vis.mappedDataDisplay.length.toLocaleString()}-point overlay for responsiveness.`
+        );
+    } else {
+      vis.legendContainer
+        .append("p")
+        .attr("class", "legend-note")
+        .text("Timeline brushing and linked filters continue to update the heatmap view.");
+    }
   }
 
   renderLegend() {
@@ -596,9 +671,6 @@ class LeafletMap {
       this.activeMapMode = mode;
     }
 
-    const showPoints = this.activeMapMode === "points";
-    this.svg.style("display", showPoints ? "block" : "none");
-
     if (this.heatLayer) {
       if (this.activeMapMode === "heat") {
         this.heatLayer.addTo(this.theMap);
@@ -614,6 +686,7 @@ class LeafletMap {
       }
     }
 
+    this.syncPointModeAppearance();
     this.renderLegend();
     return this.activeMapMode;
   }

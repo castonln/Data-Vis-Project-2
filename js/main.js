@@ -850,11 +850,20 @@ function wireUiEvents() {
   const mapModeToggleButton  = document.getElementById("map-mode-toggle");
   const clearBrushButton     = document.getElementById("clear-brush");
   const heatAvailable        = Boolean(leafletMapInstance && leafletMapInstance.heatLayer);
+  const syncMapModeControls  = () => {
+    if (!leafletMapInstance) return;
+    const isPoints = leafletMapInstance.activeMapMode === "points";
+    mapModeToggleButton.textContent = isPoints ? "Heatmap" : "Points";
+    document.getElementById("map-mode-label").textContent = isPoints ? "Points" : "Heatmap";
+    colorModeSelect.disabled = !isPoints;
+  };
 
   if (!heatAvailable) {
     mapModeToggleButton.disabled    = true;
     mapModeToggleButton.textContent = "Heatmap N/A";
     document.getElementById("map-mode-label").textContent = "Points only";
+  } else {
+    syncMapModeControls();
   }
 
   colorModeSelect.addEventListener("change", event => {
@@ -897,11 +906,8 @@ function wireUiEvents() {
   mapModeToggleButton.addEventListener("click", () => {
     if (!leafletMapInstance || !leafletMapInstance.heatLayer) return;
     const nextMode   = leafletMapInstance.activeMapMode === "points" ? "heat" : "points";
-    const activeMode = leafletMapInstance.setMapMode(nextMode);
-    const isPoints   = activeMode === "points";
-    mapModeToggleButton.textContent = isPoints ? "Heatmap" : "Points";
-    document.getElementById("map-mode-label").textContent = isPoints ? "Points" : "Heatmap";
-    colorModeSelect.disabled = !isPoints;
+    leafletMapInstance.setMapMode(nextMode);
+    syncMapModeControls();
   });
 
   clearBrushButton.addEventListener("click", () => {
@@ -1038,7 +1044,7 @@ async function initializeApp() {
       legendElement: "#legend",
       initialColorMode: "srType",
       initialBasemap: "street",
-      initialMapMode: "points",
+      initialMapMode: "heat",
       targetServiceTypes: TARGET_SERVICE_TYPES
     },
     filteredRecords
