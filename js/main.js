@@ -14,6 +14,7 @@ let omitSocrataAppToken = false;
 const DATASET_ID = "gcej-gmiw";
 // Predefined list of service types to show on the map and in the dropdown
 const TARGET_SERVICE_TYPES = ["PTHOLE", "PLMB_DEF", "MTL-FRN", "SEWAG_EX", "GRFITI", "RCYCLNG"];
+const HEAVY_TRASH_SERVICE_TYPE = "MTL-FRN";
 // Service type requests: API coverage ~2004–2026 (2026 partial).
 const DATE_RANGE_START = "2004-01-01T00:00:00.000";
 const DATE_RANGE_END = "2026-12-31T23:59:59.999";
@@ -53,6 +54,16 @@ const SELECT_FIELDS = [
   "neighborhood",
   "date_created",
   "date_last_update",
+  "num_bulky_items",
+  "bulky_item_1",
+  "bulky_item_2",
+  "bulky_item_3",
+  "bulky_item_4",
+  "bulky_item_5",
+  "num_tires",
+  "num_freons",
+  "num_sofabeds",
+  "num_potholes",
   "latitude",
   "longitude"
 ];
@@ -91,7 +102,15 @@ const timelineState = {
   brush: null,
   brushGroup: null,
   xScale: null,
-  bin: "month"
+  bin: "month",
+  series: []
+};
+
+const playbackState = {
+  timerId: null,
+  activeIndex: -1,
+  intervalMs: 650,
+  suppressBrushHandler: false
 };
 
 
@@ -110,6 +129,57 @@ function parseDate(rawDate) {
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
+function parseInteger(rawValue) {
+  if (rawValue == null || String(rawValue).trim() === "") return null;
+  const normalized = String(rawValue).replace(/,/g, "").trim();
+  const value = Number.parseInt(normalized, 10);
+  return Number.isFinite(value) ? value : null;
+}
+
+function collectTrimmedValues(record, aliases) {
+  const values = [];
+  aliases.forEach(key => {
+    const raw = record[key];
+    if (raw == null) return;
+    const trimmed = String(raw).trim();
+    if (trimmed) values.push(trimmed);
+  });
+  return values;
+}
+
+function categorizeHeavyTrashItem(rawItem) {
+  const item = String(rawItem || "").trim().toUpperCase();
+  if (!item) return null;
+  if (/MATTRESS|BOX SPRING|BED FRAME|HEAD BOARD|SIDE RAIL/.test(item)) {
+    return "Bedding / bed parts";
+  }
+  if (/SOFA|COUCH|LOVE SEAT|SECTIONAL|CHAIR|RECLINER/.test(item)) {
+    return "Seating";
+  }
+  if (/DRESSER|CABINET|TABLE|DESK|BOOKCASE|SHELF/.test(item)) {
+    return "Storage / tables";
+  }
+  if (/REFRIGERATOR|FREEZER|WASHER|DRYER|AIR CONDITIONER|STOVE|OVEN|MICROWAVE/.test(item)) {
+    return "Appliances";
+  }
+  if (/TELEVISION|TV|COMPUTER|MONITOR|ELECTRON/.test(item)) {
+    return "Electronics";
+  }
+  if (/TUB|SINK|TOILET|PLUMB/.test(item)) {
+    return "Fixtures / plumbing";
+  }
+  if (/PATIO|GRILL|OUTDOOR/.test(item)) {
+    return "Outdoor items";
+  }
+  if (/EXERCISE/.test(item)) {
+    return "Exercise equipment";
+  }
+  if (/PIPE|POLE|LUMBER|WOOD|DOOR|WINDOW/.test(item)) {
+    return "Construction debris";
+  }
+  return "Other bulky items";
+}
+
 function normalizeRecord(record) {
   const latitudeRaw  = getValue(record, ["latitude",  "LATITUDE"]);
   const longitudeRaw = getValue(record, ["longitude", "LONGITUDE"]);
@@ -118,6 +188,16 @@ function normalizeRecord(record) {
 
   const dateCreated    = parseDate(getValue(record, ["date_created",    "DATE_CREATED"]));
   const dateLastUpdate = parseDate(getValue(record, ["date_last_update","DATE_LAST_UPDATE"]));
+  const bulkyItems     = collectTrimmedValues(record, [
+    "bulky_item_1", "BULKY_ITEM_1",
+    "bulky_item_2", "BULKY_ITEM_2",
+    "bulky_item_3", "BULKY_ITEM_3",
+    "bulky_item_4", "BULKY_ITEM_4",
+    "bulky_item_5", "BULKY_ITEM_5"
+  ]);
+  const heavyTrashCategories = bulkyItems
+    .map(categorizeHeavyTrashItem)
+    .filter(Boolean);
 
   let daysToUpdate = null;
   if (dateCreated && dateLastUpdate) {
@@ -135,6 +215,13 @@ function normalizeRecord(record) {
     neighborhood:   getValue(record, ["neighborhood",    "NEIGHBORHOOD"])    || "Unknown",
     dateCreated,
     dateLastUpdate,
+    numBulkyItems: parseInteger(getValue(record, ["num_bulky_items", "NUM_BULKY_ITEMS"])) || 0,
+    bulkyItems,
+    heavyTrashCategories,
+    numTires: parseInteger(getValue(record, ["num_tires", "NUM_TIRES"])) || 0,
+    numFreons: parseInteger(getValue(record, ["num_freons", "NUM_FREONS"])) || 0,
+    numSofaBeds: parseInteger(getValue(record, ["num_sofabeds", "NUM_SOFABEDS"])) || 0,
+    numPotholesReported: parseInteger(getValue(record, ["num_potholes", "NUM_POTHOLES"])) || 0,
     latitude:  Number.isFinite(latitude)  ? latitude  : null,
     longitude: Number.isFinite(longitude) ? longitude : null,
     daysToUpdate
@@ -845,6 +932,82 @@ function renderCategoryChart(containerId, records, accessor, limit, clickFilterF
   });
 }
 
+function renderHeavyTrashChart(records) {
+  const container = d3.select("#heavy-trash-chart");
+  if (!container.node()) return;
+  container.html("");
+
+  const heavyTrashRecords = records.filter(d => d.srType === HEAVY_TRASH_SERVICE_TYPE);
+  if (heavyTrashRecords.length === 0) {
+    container.append("p")
+      .attr("class", "mini-empty")
+      .text("No heavy-trash requests in the current filter. Add MTL-FRN to inspect bulky-item details.");
+    return;
+  }
+
+  const detailedRecords = heavyTrashRecords.filter(d =>
+    d.bulkyItems.length > 0 || d.numBulkyItems > 0 || d.numFreons > 0 || d.numSofaBeds > 0
+  );
+
+  if (detailedRecords.length === 0) {
+    container.append("p")
+      .attr("class", "mini-empty")
+      .text("Heavy-trash requests are present here, but these rows do not include detailed bulky-item descriptions.");
+    return;
+  }
+
+  const categoryCounts = d3.rollups(
+    detailedRecords.flatMap(d => d.heavyTrashCategories),
+    values => values.length,
+    d => d || "Other bulky items"
+  ).sort((a, b) => d3.descending(a[1], b[1]));
+
+  if (categoryCounts.length === 0) {
+    container.append("p")
+      .attr("class", "mini-empty")
+      .text("No bulky-item category labels are available for these heavy-trash requests.");
+    return;
+  }
+
+  const maxCount = categoryCounts[0][1] || 1;
+  const totalMentions = d3.sum(categoryCounts, d => d[1]);
+  const avgItemsPerCall = totalMentions / detailedRecords.length;
+
+  container.append("p")
+    .attr("class", "mini-statline")
+    .text(
+      `${formatCount(detailedRecords.length)} detailed calls · ` +
+      `${formatCount(totalMentions)} bulky-item mentions · ` +
+      `${d3.format(".1f")(avgItemsPerCall)} items per call`
+    );
+
+  const scale = d3.scaleLinear().domain([0, maxCount]).range([0.35, 1]);
+
+  categoryCounts.slice(0, 8).forEach(([label, count]) => {
+    const row = container.append("div").attr("class", "mini-row");
+    row.append("div").attr("class", "mini-label").text(label);
+
+    row.append("div")
+      .attr("class", "mini-bar-wrap")
+      .append("div")
+      .attr("class", "mini-bar-outer")
+      .style("width", `${(count / maxCount) * 100}%`)
+      .style("background-color", `rgba(217, 119, 6, ${scale(count)})`);
+
+    row.append("div").attr("class", "mini-value").text(formatCount(count));
+  });
+
+  const freonCount = d3.sum(detailedRecords, d => d.numFreons || 0);
+  const sofaBedCount = d3.sum(detailedRecords, d => d.numSofaBeds || 0);
+
+  container.append("p")
+    .attr("class", "mini-note")
+    .text(
+      `Mentions count item slots, not unique calls. Extra flagged items in this view: ` +
+      `${formatCount(freonCount)} freon appliances and ${formatCount(sofaBedCount)} sofa beds.`
+    );
+}
+
 function updateSummaryCharts() {
   const innerLinked = innerFieldFromMapColorMode(getMapColorModeForMiniBars());
 
@@ -875,6 +1038,7 @@ function updateSummaryCharts() {
     null,
     effectiveInnerFieldForRowAxis("priority", innerLinked)
   );
+  renderHeavyTrashChart(filteredRecords);
 }
 
 
@@ -959,10 +1123,114 @@ function applyDefaultTimelineYearSelection() {
   }
 }
 
+function formatTimelinePeriodLabel(period) {
+  if (!period) return "time";
+  if (period.bin === "month") {
+    return d3.timeFormat("%B %Y")(period.periodStart);
+  }
+  const endDay = d3.timeDay.offset(period.periodEnd, -1);
+  return `${d3.timeFormat("%b %d")(period.periodStart)} - ${d3.timeFormat("%b %d, %Y")(endDay)}`;
+}
+
+function getActiveTimelineIndex() {
+  if (!activeBrushRange || !timelineState.series.length) return -1;
+  return timelineState.series.findIndex(d =>
+    +d.periodStart === +activeBrushRange[0] && +d.periodEnd === +activeBrushRange[1]
+  );
+}
+
+function updateTimelineBarHighlight() {
+  if (!timelineState.svg) return;
+  const activeIndex = getActiveTimelineIndex();
+  const hasActive = activeIndex !== -1;
+  timelineState.svg.selectAll(".timeline-bar")
+    .classed("timeline-bar--active", (_d, i) => i === activeIndex)
+    .classed("timeline-bar--dimmed", (_d, i) => hasActive && i !== activeIndex);
+}
+
+function updateTimelinePlaybackUi() {
+  const button = document.getElementById("timeline-play-toggle");
+  const status = document.getElementById("timeline-playback-status");
+  const activeIndex = getActiveTimelineIndex();
+  const activePeriod = activeIndex >= 0 ? timelineState.series[activeIndex] : null;
+  const isPlaying = playbackState.timerId !== null;
+
+  if (button) {
+    button.textContent = isPlaying ? "Pause playback" : "Play timeline";
+    button.disabled = timelineState.series.length === 0;
+    button.setAttribute("aria-pressed", isPlaying ? "true" : "false");
+  }
+
+  if (status) {
+    status.classList.toggle("is-playing", isPlaying);
+    if (isPlaying && activePeriod) {
+      status.textContent = `Playing ${formatTimelinePeriodLabel(activePeriod)}`;
+    } else if (activePeriod) {
+      status.textContent = `Showing ${formatTimelinePeriodLabel(activePeriod)}`;
+    } else if (timelineState.series.length > 0) {
+      status.textContent = "Ready to play through time";
+    } else {
+      status.textContent = "No dated requests available for playback";
+    }
+  }
+}
+
+function stopTimelinePlayback() {
+  if (playbackState.timerId !== null) {
+    window.clearInterval(playbackState.timerId);
+    playbackState.timerId = null;
+  }
+  playbackState.activeIndex = -1;
+  updateTimelinePlaybackUi();
+}
+
+function moveBrushToPeriod(period) {
+  if (!period) return;
+  activeBrushRange = [period.periodStart, period.periodEnd];
+  if (timelineState.brushGroup && timelineState.brush && timelineState.xScale) {
+    playbackState.suppressBrushHandler = true;
+    timelineState.brushGroup.call(
+      timelineState.brush.move,
+      [timelineState.xScale(period.periodStart), timelineState.xScale(period.periodEnd)]
+    );
+    playbackState.suppressBrushHandler = false;
+  }
+  applyFilters();
+  updateTimelineBarHighlight();
+  updateTimelinePlaybackUi();
+}
+
+function startTimelinePlayback() {
+  if (!timelineState.series.length) return;
+
+  let startIndex = getActiveTimelineIndex();
+  if (startIndex === -1 || startIndex >= timelineState.series.length - 1) {
+    startIndex = 0;
+  }
+
+  playbackState.activeIndex = startIndex;
+  moveBrushToPeriod(timelineState.series[startIndex]);
+
+  playbackState.timerId = window.setInterval(() => {
+    if (playbackState.activeIndex >= timelineState.series.length - 1) {
+      stopTimelinePlayback();
+      return;
+    }
+    playbackState.activeIndex += 1;
+    moveBrushToPeriod(timelineState.series[playbackState.activeIndex]);
+  }, playbackState.intervalMs);
+
+  updateTimelinePlaybackUi();
+}
+
 function handleBrush(event) {
+  if (playbackState.suppressBrushHandler) return;
+  stopTimelinePlayback();
+
   if (!event.selection) {
     activeBrushRange = null;
     applyFilters();
+    updateTimelineBarHighlight();
     return;
   }
 
@@ -982,6 +1250,7 @@ function handleBrush(event) {
     activeBrushRange = [startDate, endDate];
   }
   applyFilters();
+  updateTimelineBarHighlight();
 }
 
 function positionTimelineTooltip(event, html) {
@@ -1023,6 +1292,7 @@ function renderTimeline(records) {
   timelineState.bin = bin;
 
   const series    = buildTimelineSeries(records, bin, yearFilter);
+  timelineState.series = series;
   const container = document.getElementById("timeline-chart");
   const width     = Math.max(860, container.clientWidth || 860);
   const height    = 280;
@@ -1031,6 +1301,7 @@ function renderTimeline(records) {
   d3.select("#timeline-chart").html("");
 
   if (series.length === 0) {
+    stopTimelinePlayback();
     d3.select("#timeline-chart")
       .append("p")
       .attr("class", "mini-empty")
@@ -1133,6 +1404,21 @@ function renderTimeline(records) {
   timelineState.brush      = brush;
   timelineState.brushGroup = brushGroup;
   timelineState.xScale     = xScale;
+
+  updateTimelineBarHighlight();
+  updateTimelinePlaybackUi();
+
+  if (activeBrushRange) {
+    const activeIndex = getActiveTimelineIndex();
+    if (activeIndex !== -1) {
+      playbackState.suppressBrushHandler = true;
+      brushGroup.call(
+        brush.move,
+        [xScale(activeBrushRange[0]), xScale(activeBrushRange[1])]
+      );
+      playbackState.suppressBrushHandler = false;
+    }
+  }
 }
 
 
@@ -1180,6 +1466,8 @@ function applyFilters() {
 
   updateSummaryCharts();
   updateStatusPanel();
+  updateTimelineBarHighlight();
+  updateTimelinePlaybackUi();
 
   if (typeof window.updateLevel3Charts === "function") {
     window.updateLevel3Charts(filteredRecords, getLevel3ActiveFilters());
@@ -1232,6 +1520,7 @@ function wireUiEvents() {
   const colorModeSelect      = document.getElementById("color-mode");
   const basemapToggleButton  = document.getElementById("basemap-toggle");
   const mapModeToggleButton  = document.getElementById("map-mode-toggle");
+  const timelinePlayButton   = document.getElementById("timeline-play-toggle");
   const clearBrushButton     = document.getElementById("clear-brush");
   const heatAvailable        = Boolean(leafletMapInstance && leafletMapInstance.heatLayer);
   const syncMapModeControls  = () => {
@@ -1347,13 +1636,25 @@ function wireUiEvents() {
   });
 
   clearBrushButton.addEventListener("click", () => {
+    stopTimelinePlayback();
     if (!timelineState.brushGroup || !timelineState.brush) return;
     timelineState.brushGroup.call(timelineState.brush.move, null);
   });
 
+  if (timelinePlayButton) {
+    timelinePlayButton.addEventListener("click", () => {
+      if (playbackState.timerId !== null) {
+        stopTimelinePlayback();
+        return;
+      }
+      startTimelinePlayback();
+    });
+  }
+
   const timelineYearEl = document.getElementById("timeline-year");
   if (timelineYearEl) {
     timelineYearEl.addEventListener("change", () => {
+      stopTimelinePlayback();
       activeBrushRange = null;
       if (timelineState.brushGroup && timelineState.brush) {
         timelineState.brushGroup.call(timelineState.brush.move, null);
@@ -1397,7 +1698,7 @@ function wireUiEvents() {
       filterDepartment    = "";
       filterNeighborhoods = [];
       filterPriority = "";
-      filterServiceTypes = ["PTHOLE"];
+      filterServiceTypes = TARGET_SERVICE_TYPES.slice();
       if (filterDept) filterDept.value = "";
       if (filterPriorityEl) filterPriorityEl.value = "";
       populateNeighborhoodDropdown();
@@ -1470,7 +1771,7 @@ async function initializeApp() {
 
   allRecords      = dataset.records.slice();
   filteredRecords = allRecords.slice();
-  filterServiceTypes = ["PTHOLE"];
+  filterServiceTypes = TARGET_SERVICE_TYPES.slice();
 
   leafletMapInstance = new LeafletMap(
     {

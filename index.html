@@ -111,6 +111,11 @@
                     </div>
                     <menu class="buttons timeline-actions">
                         <li>
+                            <button id="timeline-play-toggle" type="button">
+                                Play timeline
+                            </button>
+                        </li>
+                        <li>
                             <button id="clear-brush" type="button"
                                     data-variant="secondary" class="outline">
                                 Reset date filter
@@ -231,6 +236,12 @@
                 <h2 class="bento-title">Priority Levels</h2>
                 <p class="bento-sub">Stacks like Methods / Departments — follows Color points by.</p>
                 <div id="priority-chart" class="mini-chart"></div>
+            </section>
+
+            <section class="card bento-item" id="card-heavy-trash">
+                <h2 class="bento-title">Heavy Trash Details</h2>
+                <p class="bento-sub">Within <strong>MTL-FRN</strong> requests, this summarizes the kinds of bulky items being reported in the current filter.</p>
+                <div id="heavy-trash-chart" class="mini-chart"></div>
             </section>
         </div>
 
