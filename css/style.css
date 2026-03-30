@@ -1011,6 +1011,118 @@ menu.timeline-actions {
   line-height: 1.5;
 }
 
+.chart-nav-card {
+  position: sticky;
+  top: var(--space-2);
+  z-index: 40;
+  padding: var(--space-4);
+  background: color-mix(in srgb, var(--card) 92%, white);
+  backdrop-filter: blur(14px);
+}
+
+.chart-nav-header {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: var(--space-3) var(--space-4);
+  align-items: flex-start;
+}
+
+.chart-nav-copy {
+  flex: 1 1 18rem;
+  min-width: 0;
+}
+
+.chart-nav-kicker {
+  margin: 0 0 var(--space-1);
+  font-size: var(--text-8);
+  font-weight: var(--font-semibold);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+}
+
+.chart-nav-card h2 {
+  margin: 0;
+  font-size: clamp(1.05rem, 0.95rem + 0.6vw, 1.35rem);
+  font-weight: var(--font-semibold);
+  letter-spacing: -0.02em;
+  color: var(--foreground);
+}
+
+.chart-nav-text {
+  margin: var(--space-2) 0 0;
+  max-width: 58ch;
+  font-size: var(--text-7);
+  color: var(--text-secondary);
+  line-height: 1.45;
+}
+
+.chart-nav-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.chart-nav-layout,
+.chart-nav-stepper {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.chart-nav-status {
+  margin: 0;
+  min-width: 9.5rem;
+  text-align: center;
+  font-size: var(--text-7);
+  font-weight: var(--font-semibold);
+  color: var(--foreground);
+}
+
+.chart-nav-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+
+.chart-nav-button {
+  appearance: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  background: var(--card);
+  color: var(--foreground);
+  padding: 0.55rem 0.9rem;
+  font-family: var(--font-sans);
+  font-size: var(--text-7);
+  font-weight: var(--font-medium);
+  line-height: 1.2;
+  cursor: pointer;
+  transition: background-color var(--transition-fast), border-color var(--transition-fast),
+    color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.chart-nav-button:hover {
+  background: var(--secondary);
+  border-color: var(--border-strong);
+}
+
+.chart-nav-button:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgb(37 99 235 / 18%);
+  border-color: var(--primary);
+}
+
+.chart-nav-button.is-active {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: var(--primary-foreground);
+}
+
 @media (max-width: 980px) {
   .dashboard-grid {
     grid-template-columns: 1fr;
@@ -1082,6 +1194,20 @@ menu.timeline-actions {
     grid-row: auto;
   }
 
+  .chart-nav-card {
+    position: static;
+  }
+
+  .chart-nav-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .chart-nav-status {
+    min-width: 0;
+    text-align: left;
+  }
+
   .map-toolbar--side .map-toolbar-actions button {
     flex: 1 1 calc(50% - var(--space-1));
     min-width: 7rem;
@@ -1090,4 +1216,39 @@ menu.timeline-actions {
   .mini-row {
     grid-template-columns: minmax(88px, 112px) minmax(0, 1fr) auto;
   }
+}
+
+.bento-item {
+  scroll-margin-top: 9rem;
+  transition: box-shadow var(--transition-fast), border-color var(--transition-fast),
+    transform var(--transition-fast);
+}
+
+.bento-item.is-active {
+  box-shadow: 0 14px 38px rgb(37 99 235 / 10%);
+}
+
+.app-shell--chart-focus .bento-grid {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: none;
+}
+
+.app-shell--chart-focus .bento-grid > .bento-item {
+  display: none;
+}
+
+.app-shell--chart-focus .bento-grid > .bento-item.is-active {
+  display: flex;
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.app-shell--chart-focus #card-neighborhood,
+.app-shell--chart-focus #card-methods-big,
+.app-shell--chart-focus #card-depts-big,
+.app-shell--chart-focus #bento-tip,
+.app-shell--chart-focus #card-priority-big,
+.app-shell--chart-focus #card-heavy-trash {
+  grid-column: 1;
+  grid-row: 1;
 }
