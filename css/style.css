@@ -746,6 +746,19 @@ menu.timeline-actions {
   font-size: 0.8125rem;
 }
 
+.mini-statline {
+  margin: 0 0 var(--space-1);
+  font-size: var(--text-7);
+  color: var(--text-secondary);
+}
+
+.mini-note {
+  margin: 0;
+  font-size: var(--text-8);
+  color: var(--text-muted);
+  line-height: 1.45;
+}
+
 .timeline-card {
   padding: var(--space-4);
   background: var(--card);
@@ -839,10 +852,19 @@ menu.timeline-actions {
 .timeline-bar {
   fill: var(--primary);
   shape-rendering: crispEdges;
+  transition: fill var(--transition-fast), opacity var(--transition-fast);
 }
 
 .timeline-bar:hover {
   fill: #1d4ed8;
+}
+
+.timeline-bar--active {
+  fill: #d97706;
+}
+
+.timeline-bar--dimmed {
+  opacity: 0.42;
 }
 
 .brush .selection {
@@ -908,7 +930,8 @@ menu.timeline-actions {
 .bento-grid {
   display: grid;
   grid-template-columns: minmax(11rem, 1fr) repeat(2, minmax(0, 1.2fr));
-  grid-template-rows: auto auto repeat(3, minmax(9rem, 1fr));
+  grid-template-rows: auto auto;
+  grid-auto-rows: auto;
   gap: var(--space-4);
   align-items: stretch;
 }
@@ -947,6 +970,11 @@ menu.timeline-actions {
   grid-column: 2 / 4;
   grid-row: 3 / 6;
   height: fit-content;
+}
+
+#card-heavy-trash {
+  grid-column: 1 / 4;
+  grid-row: 6;
 }
 
 .bento-item {
@@ -1001,7 +1029,8 @@ menu.timeline-actions {
   #card-methods-big,
   #card-depts-big,
   #bento-tip,
-  #card-priority-big {
+  #card-priority-big,
+  #card-heavy-trash {
     grid-column: 1 / -1;
     grid-row: auto;
   }
@@ -1047,7 +1076,8 @@ menu.timeline-actions {
   #card-methods-big,
   #card-depts-big,
   #bento-tip,
-  #card-priority-big {
+  #card-priority-big,
+  #card-heavy-trash {
     grid-column: 1 / -1;
     grid-row: auto;
   }

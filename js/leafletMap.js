@@ -416,6 +416,19 @@ class LeafletMap {
 
   tooltipHtml(d) {
     const daysLabel = Number.isFinite(d.daysToUpdate) ? d3.format(".1f")(d.daysToUpdate) : "N/A";
+    const heavyTrashRows = [];
+
+    if (d.srType === "MTL-FRN" && (d.numBulkyItems > 0 || d.bulkyItems.length > 0)) {
+      const summary = d.heavyTrashCategories && d.heavyTrashCategories.length
+        ? Array.from(new Set(d.heavyTrashCategories)).join(", ")
+        : "Detailed bulky-item categories unavailable";
+      heavyTrashRows.push(
+        `<div class="tooltip-row"><strong>Bulky items:</strong> ${d.numBulkyItems || d.bulkyItems.length}</div>`
+      );
+      heavyTrashRows.push(
+        `<div class="tooltip-row"><strong>Heavy trash mix:</strong> ${summary}</div>`
+      );
+    }
 
     return `
       <div class="tooltip-title">${d.srTypeDesc}</div>
@@ -427,6 +440,7 @@ class LeafletMap {
       <div class="tooltip-row"><strong>Department:</strong> ${d.deptName}</div>
       <div class="tooltip-row"><strong>Neighborhood:</strong> ${d.neighborhood}</div>
       <div class="tooltip-row"><strong>Priority:</strong> ${d.priority}</div>
+      ${heavyTrashRows.join("")}
     `;
   }
 
