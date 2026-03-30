@@ -113,6 +113,25 @@ const playbackState = {
   suppressBrushHandler: false
 };
 
+const CHART_NAV_ITEMS = [
+  { cardId: "card-neighborhood", label: "Neighborhoods" },
+  { cardId: "card-methods-big", label: "Methods" },
+  { cardId: "card-depts-big", label: "Departments" },
+  { cardId: "card-priority-big", label: "Priority" },
+  { cardId: "card-heavy-trash", label: "Heavy trash" }
+];
+
+const chartNavState = {
+  mode: "focus",
+  activeIndex: 0,
+  buttons: [],
+  cards: [],
+  observer: null,
+  visibility: new Map()
+};
+
+let resizeSyncTimerId = null;
+
 
 function getValue(record, aliases) {
   for (const key of aliases) {
@@ -1041,6 +1060,226 @@ function updateSummaryCharts() {
   renderHeavyTrashChart(filteredRecords);
 }
 
+function getChartNavCard(itemOrIndex) {
+  if (typeof itemOrIndex === "number") {
+    return chartNavState.cards[itemOrIndex] || null;
+  }
+  return document.getElementById(itemOrIndex.cardId);
+}
+
+function chartCount() {
+  return chartNavState.cards.length;
+}
+
+function wrapChartIndex(index) {
+  const count = chartCount();
+  if (!count) return 0;
+  return (index + count) % count;
+}
+
+function updateChartNavStatus() {
+  const statusEl = document.getElementById("chart-nav-status");
+  const prevBtn = document.getElementById("chart-prev");
+  const nextBtn = document.getElementById("chart-next");
+  const count = chartCount();
+  const currentItem = CHART_NAV_ITEMS[chartNavState.activeIndex];
+  if (statusEl && currentItem) {
+    const prefix = chartNavState.mode === "focus" ? "Focus view" : "Overview";
+    statusEl.textContent = `${prefix} ${chartNavState.activeIndex + 1} of ${count} - ${currentItem.label}`;
+  }
+  const disableStepper = count < 2;
+  if (prevBtn) prevBtn.disabled = disableStepper;
+  if (nextBtn) nextBtn.disabled = disableStepper;
+}
+
+function updateChartNavLayoutButtons() {
+  const focusBtn = document.getElementById("chart-layout-focus");
+  const overviewBtn = document.getElementById("chart-layout-overview");
+  const isFocus = chartNavState.mode === "focus";
+  if (focusBtn) {
+    focusBtn.setAttribute("aria-pressed", isFocus ? "true" : "false");
+    if (isFocus) focusBtn.removeAttribute("data-variant");
+    else focusBtn.setAttribute("data-variant", "secondary");
+    focusBtn.classList.toggle("outline", !isFocus);
+  }
+  if (overviewBtn) {
+    overviewBtn.setAttribute("aria-pressed", isFocus ? "false" : "true");
+    if (isFocus) overviewBtn.setAttribute("data-variant", "secondary");
+    else overviewBtn.removeAttribute("data-variant");
+    overviewBtn.classList.toggle("outline", isFocus);
+  }
+}
+
+function syncChartNavActiveStyles() {
+  chartNavState.cards.forEach((card, index) => {
+    const isActive = index === chartNavState.activeIndex;
+    card.classList.toggle("is-active", isActive);
+    card.setAttribute("aria-hidden", chartNavState.mode === "focus" && !isActive ? "true" : "false");
+  });
+
+  chartNavState.buttons.forEach((button, index) => {
+    const isActive = index === chartNavState.activeIndex;
+    button.classList.toggle("is-active", isActive);
+    button.setAttribute("aria-selected", isActive ? "true" : "false");
+    button.tabIndex = isActive ? 0 : -1;
+  });
+
+  updateChartNavStatus();
+}
+
+function ensureChartCardInView(card, behavior = "smooth") {
+  if (!card) return;
+  card.scrollIntoView({ behavior, block: "start" });
+}
+
+function setActiveChart(index, options = {}) {
+  const count = chartCount();
+  if (!count) return;
+
+  chartNavState.activeIndex = wrapChartIndex(index);
+  syncChartNavActiveStyles();
+
+  const shouldRerender = Boolean(options.rerender);
+  if (shouldRerender) updateSummaryCharts();
+
+  if (options.scroll) {
+    ensureChartCardInView(getChartNavCard(chartNavState.activeIndex), options.behavior || "smooth");
+  }
+}
+
+function setChartLayoutMode(mode, options = {}) {
+  const shell = document.querySelector("main.app-shell");
+  chartNavState.mode = mode === "overview" ? "overview" : "focus";
+  if (shell) {
+    shell.classList.toggle("app-shell--chart-focus", chartNavState.mode === "focus");
+  }
+
+  updateChartNavLayoutButtons();
+  setActiveChart(chartNavState.activeIndex, {
+    rerender: options.rerender,
+    scroll: options.scroll,
+    behavior: options.behavior
+  });
+}
+
+function installChartNavObserver() {
+  if (typeof IntersectionObserver !== "function" || chartNavState.cards.length === 0) return;
+  if (chartNavState.observer) chartNavState.observer.disconnect();
+
+  chartNavState.visibility.clear();
+  chartNavState.observer = new IntersectionObserver(entries => {
+    entries.forEach(entry => {
+      chartNavState.visibility.set(entry.target.id, entry.isIntersecting ? entry.intersectionRatio : 0);
+    });
+
+    if (chartNavState.mode !== "overview") return;
+
+    let bestIndex = chartNavState.activeIndex;
+    let bestRatio = 0;
+    CHART_NAV_ITEMS.forEach((item, index) => {
+      const ratio = chartNavState.visibility.get(item.cardId) || 0;
+      if (ratio > bestRatio) {
+        bestRatio = ratio;
+        bestIndex = index;
+      }
+    });
+
+    if (bestRatio >= 0.2 && bestIndex !== chartNavState.activeIndex) {
+      setActiveChart(bestIndex);
+    }
+  }, {
+    threshold: [0.15, 0.3, 0.5, 0.7],
+    rootMargin: "-8% 0px -44% 0px"
+  });
+
+  chartNavState.cards.forEach(card => chartNavState.observer.observe(card));
+}
+
+function initializeChartNavigator() {
+  const navButtonsEl = document.getElementById("chart-nav-buttons");
+  const focusBtn = document.getElementById("chart-layout-focus");
+  const overviewBtn = document.getElementById("chart-layout-overview");
+  const prevBtn = document.getElementById("chart-prev");
+  const nextBtn = document.getElementById("chart-next");
+
+  if (!navButtonsEl || !focusBtn || !overviewBtn || !prevBtn || !nextBtn) return;
+
+  chartNavState.cards = CHART_NAV_ITEMS
+    .map(item => getChartNavCard(item))
+    .filter(Boolean);
+
+  if (chartNavState.cards.length === 0) return;
+
+  navButtonsEl.innerHTML = "";
+  chartNavState.buttons = CHART_NAV_ITEMS.map((item, index) => {
+    const card = getChartNavCard(item);
+    if (!card) return null;
+
+    card.setAttribute("tabindex", "-1");
+
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "chart-nav-button";
+    button.id = `chart-nav-tab-${index}`;
+    button.dataset.chartIndex = String(index);
+    button.setAttribute("role", "tab");
+    button.setAttribute("aria-controls", item.cardId);
+    button.textContent = item.label;
+    card.setAttribute("role", "tabpanel");
+    card.setAttribute("aria-labelledby", button.id);
+    button.addEventListener("click", () => {
+      setActiveChart(index, {
+        rerender: chartNavState.mode === "focus",
+        scroll: true
+      });
+    });
+    navButtonsEl.append(button);
+    return button;
+  }).filter(Boolean);
+
+  navButtonsEl.addEventListener("keydown", event => {
+    let nextIndex = null;
+    if (event.key === "ArrowRight") nextIndex = wrapChartIndex(chartNavState.activeIndex + 1);
+    if (event.key === "ArrowLeft") nextIndex = wrapChartIndex(chartNavState.activeIndex - 1);
+    if (event.key === "Home") nextIndex = 0;
+    if (event.key === "End") nextIndex = chartCount() - 1;
+    if (nextIndex === null) return;
+
+    event.preventDefault();
+    setActiveChart(nextIndex, {
+      rerender: chartNavState.mode === "focus",
+      scroll: chartNavState.mode === "overview"
+    });
+    const nextButton = chartNavState.buttons[nextIndex];
+    if (nextButton) nextButton.focus();
+  });
+
+  focusBtn.addEventListener("click", () => {
+    setChartLayoutMode("focus", { rerender: true, scroll: true });
+  });
+
+  overviewBtn.addEventListener("click", () => {
+    setChartLayoutMode("overview", { rerender: true, scroll: true });
+  });
+
+  prevBtn.addEventListener("click", () => {
+    setActiveChart(chartNavState.activeIndex - 1, {
+      rerender: chartNavState.mode === "focus",
+      scroll: true
+    });
+  });
+
+  nextBtn.addEventListener("click", () => {
+    setActiveChart(chartNavState.activeIndex + 1, {
+      rerender: chartNavState.mode === "focus",
+      scroll: true
+    });
+  });
+
+  installChartNavObserver();
+  setChartLayoutMode("focus", { rerender: true });
+}
+
 
 const PTHOLE_MIN_YEAR = 2004;
 
@@ -1760,6 +1999,15 @@ function wireUiEvents() {
   if (filterChipsScopeEl) {
     filterChipsScopeEl.addEventListener("click", handleChipClick);
   }
+
+  window.addEventListener("resize", () => {
+    if (resizeSyncTimerId !== null) window.clearTimeout(resizeSyncTimerId);
+    resizeSyncTimerId = window.setTimeout(() => {
+      if (allRecords.length === 0) return;
+      renderTimeline(allRecords);
+      updateSummaryCharts();
+    }, 140);
+  });
 }
 
 
@@ -1812,6 +2060,7 @@ async function initializeApp() {
   applyFilters();
   renderTimeline(allRecords);
   wireUiEvents();
+  initializeChartNavigator();
 
   const basemapLabel = document.getElementById("basemap-label");
   const basemapBtn   = document.getElementById("basemap-toggle");

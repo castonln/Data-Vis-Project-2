@@ -205,7 +205,44 @@
             </aside>
         </section>
 
-        <div class="bento-grid" aria-label="Attribute charts">
+        <section class="card chart-nav-card" aria-labelledby="chart-nav-title">
+            <div class="chart-nav-header">
+                <div class="chart-nav-copy">
+                    <p class="chart-nav-kicker">Chart navigator</p>
+                    <h2 id="chart-nav-title">Move through the detail charts faster</h2>
+                    <p class="chart-nav-text">
+                        Use <strong>Focus view</strong> to swap one chart into the stage, or switch to
+                        <strong>Show all</strong> when you want the full dashboard overview back.
+                    </p>
+                </div>
+                <div class="chart-nav-actions">
+                    <div class="chart-nav-layout" role="group" aria-label="Chart layout">
+                        <button id="chart-layout-focus" type="button">Focus view</button>
+                        <button id="chart-layout-overview" type="button"
+                                data-variant="secondary" class="outline">
+                            Show all
+                        </button>
+                    </div>
+                    <div class="chart-nav-stepper" role="group" aria-label="Move between charts">
+                        <button id="chart-prev" type="button"
+                                data-variant="secondary" class="outline">
+                            Previous
+                        </button>
+                        <p id="chart-nav-status" class="chart-nav-status" aria-live="polite">
+                            1 of 5
+                        </p>
+                        <button id="chart-next" type="button"
+                                data-variant="secondary" class="outline">
+                            Next
+                        </button>
+                    </div>
+                </div>
+            </div>
+            <div id="chart-nav-buttons" class="chart-nav-buttons" role="tablist"
+                 aria-label="Jump to a chart"></div>
+        </section>
+
+        <div class="bento-grid" id="chart-grid" aria-label="Attribute charts">
             <section class="card bento-item" id="card-neighborhood">
                 <h2 class="bento-title">Top Neighborhoods</h2>
                 <p class="bento-sub">Bar length = total requests; colors = share by service type (click a row to filter).</p>
