@@ -40,6 +40,8 @@
   /* Sequential “days to update”: light red → dark indigo */
   --seq-light: #fecaca;
   --seq-dark: #312e81;
+
+  --bar-height: 1rem;
 }
 
 body {
@@ -131,6 +133,15 @@ main.app-shell {
   max-width: min(100%, 20rem);
 }
 
+/* Align map control row: multi-select matches native select weight/height */
+.field-map-select .multi-select-button,
+.field-map-select select {
+  background: var(--card);
+  border: 1px solid var(--border-strong);
+  min-height: 2.375rem;
+  box-sizing: border-box;
+}
+
 .multi-select-dropdown {
   position: relative;
 }
@@ -165,12 +176,21 @@ main.app-shell {
   border: 1px solid var(--border);
   border-radius: var(--radius-medium);
   box-shadow: var(--shadow-medium);
-  max-height: 200px;
+  max-height: min(22rem, 70vh);
   overflow-y: auto;
   z-index: 1000;
 }
 
-.multi-select-options label {
+.multi-select-options label.service-type-option {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  cursor: pointer;
+  font-size: var(--text-6);
+}
+
+.multi-select-options label:not(.service-type-option) {
   display: block;
   padding: var(--space-2) var(--space-3);
   cursor: pointer;
@@ -182,7 +202,24 @@ main.app-shell {
 }
 
 .multi-select-options input[type="checkbox"] {
-  margin-right: var(--space-2);
+  margin-right: 0;
+  flex-shrink: 0;
+}
+
+.multi-select-options .service-type-option-label {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.multi-select-options .service-type-color-input {
+  width: 2rem;
+  height: 1.5rem;
+  padding: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-small);
+  cursor: pointer;
+  flex-shrink: 0;
+  background: var(--card);
 }
 
 .controls-map menu.map-action-buttons {
@@ -280,9 +317,16 @@ main.app-shell {
   background: rgb(37 99 235 / 6%);
 }
 
+/* Per-type tint via --chip-type-color (set in JS from legend colors) */
 .filter-chip-service-type {
-  border-color: rgb(127 29 29 / 28%);
-  background: rgb(127 29 29 / 6%);
+  --chip-type-color: var(--border);
+  border-color: color-mix(in srgb, var(--chip-type-color) 42%, var(--border));
+  background: color-mix(in srgb, var(--chip-type-color) 18%, var(--card));
+}
+
+.filter-chip-service-type:hover {
+  border-color: color-mix(in srgb, var(--chip-type-color) 55%, var(--border));
+  background: color-mix(in srgb, var(--chip-type-color) 26%, var(--accent));
 }
 
 .filter-chip span:first-child {
@@ -458,6 +502,35 @@ menu.timeline-actions {
   background: rgb(37 99 235 / 8%) !important;
 }
 
+/* Sidebar: hint on top; draw / move / clear in one horizontal row */
+.map-toolbar--side {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.map-toolbar--side .map-toolbar-text {
+  flex: none;
+}
+
+.map-toolbar--side .map-toolbar-hint {
+  max-width: none;
+}
+
+.map-toolbar--side .map-toolbar-actions {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: var(--space-2);
+  width: 100%;
+}
+
+.map-toolbar--side .map-toolbar-actions button {
+  flex: 1 1 calc(33.333% - var(--space-2));
+  min-width: 5.5rem;
+  width: auto;
+}
+
 @media (max-width: 560px) {
   .map-toolbar-actions {
     width: 100%;
@@ -480,6 +553,14 @@ menu.timeline-actions {
 
 #my-map.map-brush-mode {
   cursor: crosshair;
+}
+
+#my-map.map-move-region-mode {
+  cursor: grab;
+}
+
+#my-map.map-move-region-mode:active {
+  cursor: grabbing;
 }
 
 .leaflet-container .leaflet-pane > canvas,
@@ -519,7 +600,7 @@ menu.timeline-actions {
 }
 
 #legend {
-  max-height: 38vh;
+  max-height: 10vh;
   overflow: auto;
   padding-right: var(--space-1);
 }
@@ -592,18 +673,18 @@ menu.timeline-actions {
 
 .mini-chart {
   display: grid;
-  gap: var(--space-1);
+  gap: var(--space-2);
 }
 
 .mini-row {
   display: grid;
-  grid-template-columns: minmax(96px, 128px) minmax(0, 1fr) auto;
+  grid-template-columns: minmax(110px, 160px) minmax(0, 1fr) auto;
   align-items: center;
-  gap: var(--space-2);
+  gap: var(--space-3);
 }
 
 .mini-label {
-  font-size: var(--text-8);
+  font-size: var(--text-7);
   color: var(--text-secondary);
   white-space: nowrap;
   overflow: hidden;
@@ -617,14 +698,42 @@ menu.timeline-actions {
   overflow: hidden;
 }
 
-.mini-bar {
+/* Overall row magnitude; inner segments = service-type mix (solid colors, no gradient). */
+.mini-bar-outer {
   height: 100%;
+  min-width: 2px;
   border-radius: 3px;
-  background: linear-gradient(90deg, var(--seq-light) 0%, var(--seq-dark) 100%);
+  overflow: hidden;
+}
+
+.mini-bar-segments {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  align-items: stretch;
+  height: 100%;
+  width: 100%;
+}
+
+.mini-seg {
+  flex: 0 0 auto;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.mini-seg:not(:last-child) {
+  border-right: 1px solid var(--chart-track);
+}
+
+.mini-row.mini-row--active {
+  background: rgb(37 99 235 / 6%);
+  border-radius: var(--radius-small);
+  margin-inline: calc(-1 * var(--space-1));
+  padding-inline: var(--space-1);
 }
 
 .mini-value {
-  font-size: 0.72rem;
+  font-size: 0.8rem;
   font-weight: var(--font-semibold);
   font-variant-numeric: tabular-nums;
   color: var(--text-muted);
@@ -795,6 +904,85 @@ menu.timeline-actions {
   margin-bottom: 0;
 }
 
+/* Bento layout — 3×5-style asymmetric grid (see design reference) */
+.bento-grid {
+  display: grid;
+  grid-template-columns: minmax(11rem, 1fr) repeat(2, minmax(0, 1.2fr));
+  grid-template-rows: auto auto repeat(3, minmax(9rem, 1fr));
+  gap: var(--space-4);
+  align-items: stretch;
+}
+
+.bento-grid > .bento-item {
+  min-width: 0;
+  min-height: 0;
+}
+
+/* Box 1 — large top-left */
+#card-neighborhood {
+  grid-column: 1 / 3;
+  grid-row: 1 / 3;
+}
+
+/* Box 2 & 3 — right column stack */
+#card-methods-big {
+  grid-column: 3;
+  grid-row: 1;
+}
+
+#card-depts-big {
+  grid-column: 3;
+  grid-row: 2;
+}
+
+/* Narrow column, rows 3–5 */
+#bento-tip {
+  grid-column: 1;
+  grid-row: 3 / 6;
+  height: fit-content;
+}
+
+/* Wide bottom — spans 2 cols × 3 rows */
+#card-priority-big {
+  grid-column: 2 / 4;
+  grid-row: 3 / 6;
+  height: fit-content;
+}
+
+.bento-item {
+  padding: var(--space-4) var(--space-5);
+  border-radius: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  box-shadow: var(--shadow-medium);
+}
+
+#bento-tip {
+  background: linear-gradient(165deg, var(--muted) 0%, var(--faint) 100%);
+}
+
+.bento-title {
+  margin: 0;
+  font-size: var(--text-5);
+  font-weight: var(--font-semibold);
+  color: var(--foreground);
+}
+
+.bento-sub {
+  margin: calc(-1 * var(--space-1)) 0 0;
+  font-size: var(--text-7);
+  color: var(--text-secondary);
+  line-height: 1.45;
+}
+
+.bento-tip-text {
+  margin: 0;
+  font-size: var(--text-6);
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
 @media (max-width: 980px) {
   .dashboard-grid {
     grid-template-columns: 1fr;
@@ -802,6 +990,20 @@ menu.timeline-actions {
 
   #my-map {
     height: min(58vh, 520px);
+  }
+
+  .bento-grid {
+    grid-template-columns: 1fr;
+    grid-template-rows: none;
+  }
+
+  #card-neighborhood,
+  #card-methods-big,
+  #card-depts-big,
+  #bento-tip,
+  #card-priority-big {
+    grid-column: 1 / -1;
+    grid-row: auto;
   }
 }
 
@@ -834,6 +1036,25 @@ menu.timeline-actions {
   .timeline-header {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .bento-grid {
+    grid-template-columns: 1fr;
+    grid-template-rows: none;
+  }
+
+  #card-neighborhood,
+  #card-methods-big,
+  #card-depts-big,
+  #bento-tip,
+  #card-priority-big {
+    grid-column: 1 / -1;
+    grid-row: auto;
+  }
+
+  .map-toolbar--side .map-toolbar-actions button {
+    flex: 1 1 calc(50% - var(--space-1));
+    min-width: 7rem;
   }
 
   .mini-row {

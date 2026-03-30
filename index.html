@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Cincinnati 311 Pothole Requests</title>
+    <title>Cincinnati 311 — focused service requests</title>
     <link rel="icon" href="data:;base64,iVBORwOKGO=" />
     <link rel="stylesheet" href="https://unpkg.com/@knadh/oat/oat.min.css" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -16,10 +16,10 @@
     <main class="app-shell">
 
         <header class="card hero-card">
-            <h1>Cincinnati 311 Pothole Requests</h1>
+            <h1>Cincinnati 311: focused service requests</h1>
             <p class="subtitle">
-                Interactive map of pothole (PTHOLE) requests.
-                Live data covers about 2004–2026. 2026 is partial (through March 21).
+                Interactive map and charts for six 311 categories (potholes, plumbing, metal furniture,
+                sewage, graffiti, recycling). Live data covers about 2004-2026; 2026 is partial (through March 21).
                 Earliest years have very few records.
             </p>
 
@@ -28,7 +28,7 @@
                 <section class="controls-block controls-map" aria-labelledby="controls-map-title">
                     <h3 id="controls-map-title" class="controls-heading">Map</h3>
                     <div class="controls-map-inner">
-                        <div class="field field-color">
+                        <div class="field field-color field-map-select">
                             <label for="color-mode">Color points by</label>
                             <select id="color-mode" aria-label="Color map points by category">
                                 <option value="daysToUpdate">Time to last update (days)</option>
@@ -38,8 +38,8 @@
                                 <option value="srType" selected>Service type</option>
                             </select>
                         </div>
-                        <div class="field field-service-types">
-                            <label for="service-types-dropdown">Service types</label>
+                        <div class="field field-service-types field-map-select">
+                            <label for="service-types-toggle">Service types</label>
                             <div class="multi-select-dropdown">
                                 <button id="service-types-toggle" type="button" class="multi-select-button">
                                     Select service types…
@@ -129,13 +129,17 @@
 
         <section class="dashboard-grid">
             <article class="card map-card">
-                <div class="map-toolbar" role="toolbar" aria-label="Map selection tools">
+                <div id="my-map" aria-label="311 service request map"></div>
+            </article>
+
+            <aside class="card side-card">
+                <div class="map-toolbar map-toolbar--side" role="toolbar" aria-label="Map selection tools">
                     <div class="map-toolbar-text">
                         <strong class="map-toolbar-title">Select on the map</strong>
                         <p class="map-toolbar-hint">
-                            Click <strong>Draw region</strong>, then drag a rectangle on the map.
-                            Everything below (timeline and charts) filters to points inside the box.
-                            Press <kbd>Esc</kbd> to cancel drawing.
+                            <strong>Draw region</strong> then drag on the map to define a filter.
+                            Use <strong>Move region</strong> to drag the box without panning the map.
+                            Press <kbd>Esc</kbd> to cancel drawing or move mode.
                         </p>
                     </div>
                     <div class="map-toolbar-actions">
@@ -145,6 +149,12 @@
                                 title="Then drag on the map to draw a rectangle filter">
                             Draw region
                         </button>
+                        <button id="map-move-region" type="button" data-variant="secondary"
+                                class="outline" disabled
+                                aria-pressed="false"
+                                title="Drag inside the blue rectangle to reposition it (map won’t pan)">
+                            Move region
+                        </button>
                         <button id="map-clear-region" type="button" data-variant="secondary"
                                 class="outline" disabled
                                 title="Remove the rectangle and show all points again">
@@ -152,10 +162,7 @@
                         </button>
                     </div>
                 </div>
-                <div id="my-map" aria-label="Pothole service request map"></div>
-            </article>
 
-            <aside class="card side-card">
                 <section>
                     <h2>Legend</h2>
                     <div id="legend"></div>
@@ -190,67 +197,41 @@
                 </section>
 
                 <div id="data-warning" role="alert" hidden></div>
-
-                <section>
-                    <h2>Common Methods</h2>
-                    <div id="methods-chart" class="mini-chart"></div>
-                </section>
-
-                <section>
-                    <h2>Most Responsible Departments</h2>
-                    <div id="depts-chart" class="mini-chart"></div>
-                </section>
-
-                <section>
-                    <h2>Priority Levels</h2>
-                    <div id="priority-chart" class="mini-chart"></div>
-                </section>
             </aside>
         </section>
 
+        <div class="bento-grid" aria-label="Attribute charts">
+            <section class="card bento-item" id="card-neighborhood">
+                <h2 class="bento-title">Top Neighborhoods</h2>
+                <p class="bento-sub">Bar length = total requests; colors = share by service type (click a row to filter).</p>
+                <div id="neighborhood-chart" class="mini-chart"></div>
+            </section>
 
-        <p class="text-light mt-6 mb-4">
-            Attribute Views
-        </p>
+            <section class="card bento-item" id="card-methods-big">
+                <h2 class="bento-title">Common Methods</h2>
+                <p class="bento-sub">Bar segments follow <strong>Map → Color points by</strong> (mix within each method).</p>
+                <div id="methods-chart" class="mini-chart"></div>
+            </section>
 
-        <div class="row">
+            <section class="card bento-item" id="card-depts-big">
+                <h2 class="bento-title">Most Responsible Departments</h2>
+                <p class="bento-sub">Same as above per department (service type if row would duplicate the color mode).</p>
+                <div id="depts-chart" class="mini-chart"></div>
+            </section>
 
-            <div class="col-12">
-                <section class="card" id="card-neighborhood">
-                    <div class="timeline-header">
-                        <h2>Top Neighborhoods by Requests</h2>
-                    </div>
-                    <div id="neighborhood-chart"></div>
-                </section>
-            </div>
+            <aside class="card bento-item" id="bento-tip">
+                <h2 class="bento-title">Linked views</h2>
+                <p class="bento-tip-text">
+                    Timeline brush, map region, and chart clicks all filter the same dataset.
+                    <strong>Top Neighborhoods</strong> always stacks by service type; the other three charts stack by whatever you chose under <strong>Color points by</strong> (Time to last update still stacks by service type).
+                </p>
+            </aside>
 
-            <div class="col-6">
-                <section class="card" id="card-method">
-                    <div class="timeline-header">
-                        <h2>Method Received</h2>
-                    </div>
-                    <div id="method-chart"></div>
-                </section>
-            </div>
-
-            <div class="col-6">
-                <section class="card" id="card-dept">
-                    <div class="timeline-header">
-                        <h2>Responsible Department</h2>
-                    </div>
-                    <div id="dept-chart"></div>
-                </section>
-            </div>
-
-            <div class="col-6">
-                <section class="card" id="card-priority-l3">
-                    <div class="timeline-header">
-                        <h2>Priority Level</h2>
-                    </div>
-                    <div id="priority-chart-l3"></div>
-                </section>
-            </div>
-
+            <section class="card bento-item" id="card-priority-big">
+                <h2 class="bento-title">Priority Levels</h2>
+                <p class="bento-sub">Stacks like Methods / Departments — follows Color points by.</p>
+                <div id="priority-chart" class="mini-chart"></div>
+            </section>
         </div>
 
     </main>

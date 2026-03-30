@@ -18,6 +18,30 @@ const TARGET_SERVICE_TYPES = ["PTHOLE", "PLMB_DEF", "MTL-FRN", "SEWAG_EX", "GRFI
 const DATE_RANGE_START = "2004-01-01T00:00:00.000";
 const DATE_RANGE_END = "2026-12-31T23:59:59.999";
 const SOCRATA_CSV_PAGE_LIMIT = 50000;
+/** Parallel CSV page fetches (same $where); keep moderate to reduce 429 risk without an app token. */
+const SOCRATA_PARALLEL_PAGES = 4;
+
+/** Default timeline year (filters map + charts on load; user can switch to “All years”). */
+const DEFAULT_TIMELINE_YEAR = 2025;
+
+const STORAGE_KEY_SERVICE_TYPE_COLORS = "cincinnati311_serviceTypeColors_v1";
+
+function loadServiceTypeColorsFromStorage() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY_SERVICE_TYPE_COLORS);
+    if (!raw) return {};
+    const o = JSON.parse(raw);
+    return o && typeof o === "object" ? o : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveServiceTypeColorsToStorage(colors) {
+  try {
+    localStorage.setItem(STORAGE_KEY_SERVICE_TYPE_COLORS, JSON.stringify(colors));
+  } catch { /* quota / private mode */ }
+}
 
 const SELECT_FIELDS = [
   "sr_number",
@@ -44,6 +68,20 @@ let filterDepartment     = "";
 let filterNeighborhoods  = [];
 let filterPriority       = "";
 let filterMethodReceived = "";
+/** Checked service types for filtering (subset of TARGET_SERVICE_TYPES once data is loaded). */
+let filterServiceTypes   = [];
+
+function getLevel3ActiveFilters() {
+  return {
+    neighborhood: filterNeighborhoods[0] || "",
+    method: filterMethodReceived,
+    dept: filterDepartment,
+    priority: filterPriority,
+    serviceTypesSelected: [...filterServiceTypes],
+    serviceTypeColors: leafletMapInstance ? leafletMapInstance.getServiceTypeColorsObject() : {},
+    serviceTypesOnlySubset: filterServiceTypes.length < TARGET_SERVICE_TYPES.length
+  };
+}
 
 let dataSourceLabel   = "Unknown";
 let dataWarningMessage = "";
@@ -113,13 +151,21 @@ function setDataLoadProgress(message) {
   if (el) el.textContent = message;
 }
 
-async function requestSocrataCsv(url) {
+/**
+ * Push filter work to Socrata so we download only the six target service types, not the full 311 feed.
+ * (Roughly 600k rows vs 2.1M+ for the date range alone — fewer pages, less bandwidth, faster parse.)
+ */
+function buildSocrataWhereClauseForTargetTypes() {
+  const list = TARGET_SERVICE_TYPES.map(t => `'${String(t).replace(/'/g, "''")}'`).join(",");
+  return `date_created between '${DATE_RANGE_START}' and '${DATE_RANGE_END}' AND sr_type IN (${list})`;
+}
+
+async function socrataFetchWithRetry(url) {
   const headers = {};
   if (SOCRATA_APP_TOKEN && !omitSocrataAppToken) {
     headers["X-App-Token"] = SOCRATA_APP_TOKEN;
   }
 
-  setDataLoadProgress("Loading from API…");
   const response = await fetch(url, { headers });
   const text = await response.text();
 
@@ -137,7 +183,7 @@ async function requestSocrataCsv(url) {
       /invalid app_token/i.test(portalMsg)
     ) {
       omitSocrataAppToken = true;
-      return requestSocrataCsv(url);
+      return socrataFetchWithRetry(url);
     }
     if (response.status === 429) {
       const retry = response.headers.get("Retry-After");
@@ -149,6 +195,15 @@ async function requestSocrataCsv(url) {
     );
   }
 
+  return text;
+}
+
+async function requestSocrataCsv(url, options = {}) {
+  const { silent = false } = options;
+  if (!silent) setDataLoadProgress("Loading from API…");
+
+  const text = await socrataFetchWithRetry(url);
+
   let rows;
   try {
     rows = d3.csvParse(text);
@@ -159,27 +214,47 @@ async function requestSocrataCsv(url) {
 
   if (!Array.isArray(rows)) throw new Error("Socrata CSV parse did not return rows.");
 
-  setDataLoadProgress(`Loading from API… ${formatCount(rows.length)} rows`);
+  if (!silent) setDataLoadProgress(`Loading from API… ${formatCount(rows.length)} rows`);
   return rows;
 }
 
-async function fetchAllSocrataRecords() {
-  omitSocrataAppToken = false;
-  const whereClause = `date_created between '${DATE_RANGE_START}' and '${DATE_RANGE_END}'`;
+async function fetchSocrataRowCount(whereClause) {
+  const params = new URLSearchParams({
+    $select: "count(*)",
+    $where: whereClause
+  });
+  const url = `https://${SOCRATA_DOMAIN}/resource/${DATASET_ID}.json?${params.toString()}`;
+  const text = await socrataFetchWithRetry(url);
+  let data;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    throw new Error("Socrata count response was not valid JSON.");
+  }
+  if (!Array.isArray(data) || !data.length) return 0;
+  const raw = data[0].count ?? data[0].COUNT;
+  return Math.max(0, parseInt(String(raw ?? "0"), 10));
+}
+
+async function fetchSocrataPage(whereClause, offset) {
+  const params = new URLSearchParams({
+    $select: SELECT_FIELDS.join(","),
+    $where: whereClause,
+    $order: ":id",
+    $limit: String(SOCRATA_CSV_PAGE_LIMIT),
+    $offset: String(offset)
+  });
+  const url = `https://${SOCRATA_DOMAIN}/resource/${DATASET_ID}.csv?${params.toString()}`;
+  return requestSocrataCsv(url, { silent: true });
+}
+
+async function fetchAllSocrataRecordsSequential(whereClause) {
   const allRows = [];
   let offset = 0;
   const maxPages = 50;
 
   for (let p = 0; p < maxPages; p++) {
-    const params = new URLSearchParams({
-      $select: SELECT_FIELDS.join(","),
-      $where:  whereClause,
-      $order:  ":id",
-      $limit:  String(SOCRATA_CSV_PAGE_LIMIT),
-      $offset: String(offset)
-    });
-    const url = `https://${SOCRATA_DOMAIN}/resource/${DATASET_ID}.csv?${params.toString()}`;
-    const rows = await requestSocrataCsv(url);
+    const rows = await fetchSocrataPage(whereClause, offset);
     allRows.push(...rows);
     setDataLoadProgress(`Loading from API… ${formatCount(allRows.length)} rows`);
     if (rows.length === 0 || rows.length < SOCRATA_CSV_PAGE_LIMIT) break;
@@ -189,15 +264,56 @@ async function fetchAllSocrataRecords() {
   return allRows;
 }
 
+async function fetchAllSocrataRecords() {
+  omitSocrataAppToken = false;
+  const whereClause = buildSocrataWhereClauseForTargetTypes();
+
+  setDataLoadProgress("Counting matching rows…");
+  let totalRows;
+  try {
+    totalRows = await fetchSocrataRowCount(whereClause);
+  } catch (err) {
+    console.warn("Socrata count query failed; falling back to sequential paging.", err);
+    return fetchAllSocrataRecordsSequential(whereClause);
+  }
+
+  if (totalRows === 0) return [];
+
+  const pageCount = Math.min(50, Math.ceil(totalRows / SOCRATA_CSV_PAGE_LIMIT));
+  setDataLoadProgress(`Loading ${formatCount(totalRows)} rows (${pageCount} request${pageCount === 1 ? "" : "s"})…`);
+
+  if (pageCount === 1) {
+    const rows = await fetchSocrataPage(whereClause, 0);
+    setDataLoadProgress(`Loading from API… ${formatCount(rows.length)} rows`);
+    return rows;
+  }
+
+  const allRows = [];
+  for (let start = 0; start < pageCount; start += SOCRATA_PARALLEL_PAGES) {
+    const batchOffsets = [];
+    for (let i = 0; i < SOCRATA_PARALLEL_PAGES && start + i < pageCount; i++) {
+      batchOffsets.push((start + i) * SOCRATA_CSV_PAGE_LIMIT);
+    }
+    const batchRows = await Promise.all(batchOffsets.map(off => fetchSocrataPage(whereClause, off)));
+    for (const rows of batchRows) allRows.push(...rows);
+    setDataLoadProgress(
+      `Loading from API… ${formatCount(allRows.length)} / ${formatCount(totalRows)}`
+    );
+  }
+
+  return allRows;
+}
+
 function populateServiceTypesDropdown() {
   const el = document.getElementById("service-types-options");
   if (!el) return;
-  
+
   el.innerHTML = "";
-  
+
   TARGET_SERVICE_TYPES.forEach(type => {
-    const label = document.createElement("label");
-    
+    const row = document.createElement("label");
+    row.className = "service-type-option";
+
     const checkbox = document.createElement("input");
     checkbox.type = "checkbox";
     checkbox.value = type;
@@ -213,12 +329,33 @@ function populateServiceTypesDropdown() {
       updateServiceTypesButtonText();
       applyFilters();
     });
-    
-    label.appendChild(checkbox);
+
     const text = document.createElement("span");
+    text.className = "service-type-option-label";
     text.textContent = type;
-    label.appendChild(text);
-    el.appendChild(label);
+
+    const colorInput = document.createElement("input");
+    colorInput.type = "color";
+    colorInput.className = "service-type-color-input";
+    colorInput.setAttribute("aria-label", `Color for ${type}`);
+    colorInput.title = `Map color for ${type}`;
+    if (leafletMapInstance) {
+      colorInput.value = leafletMapInstance.getServiceTypeColor(type);
+    }
+    colorInput.addEventListener("click", e => e.stopPropagation());
+    colorInput.addEventListener("change", () => {
+      if (!leafletMapInstance) return;
+      leafletMapInstance.setServiceTypeColor(type, colorInput.value);
+      saveServiceTypeColorsToStorage(leafletMapInstance.getServiceTypeColorsObject());
+      if (typeof window.updateLevel3Charts === "function") {
+        window.updateLevel3Charts(filteredRecords, getLevel3ActiveFilters());
+      }
+    });
+
+    row.appendChild(checkbox);
+    row.appendChild(text);
+    row.appendChild(colorInput);
+    el.appendChild(row);
   });
 }
 
@@ -407,6 +544,7 @@ function renderFilterChips() {
         btn.dataset.filterField = "filterServiceType";
         btn.dataset.filterValue = st;
         btn.setAttribute("aria-label", `Remove service type: ${st}`);
+        btn.style.setProperty("--chip-type-color", getServiceTypeColorForMini(st));
         const span = document.createElement("span");
         span.textContent = st;
         const x = document.createElement("span");
@@ -447,9 +585,9 @@ function updateStatusPanel() {
 
   const partialEl = document.getElementById("partial-year-note");
   if (partialEl) {
-    partialEl.hidden = !allRecords.some(
-      r => r.dateCreated && r.dateCreated.getFullYear() === 2026
-    );
+    const yearEl = document.getElementById("timeline-year");
+    const selectedYear = yearEl ? yearEl.value.trim() : "";
+    partialEl.hidden = selectedYear !== "2026";
   }
 
   document.getElementById("active-range").textContent = formatRange(activeBrushRange);
@@ -478,12 +616,34 @@ function updateStatusPanel() {
     mapDrawBtn.title = heatMode ? "Switch to Points mode to draw a map region." : "";
     const active = leafletMapInstance.brushModeActive;
     mapDrawBtn.setAttribute("aria-pressed", active ? "true" : "false");
-    mapDrawBtn.textContent = active ? "Drawing… (drag on map)" : "Draw region";
+    mapDrawBtn.textContent = active ? "Drawing..." : "Draw region";
   }
 
   const mapClearBtn = document.getElementById("map-clear-region");
   if (mapClearBtn) {
     mapClearBtn.disabled = !mapSelectionBounds;
+  }
+
+  const mapMoveBtn = document.getElementById("map-move-region");
+  if (mapMoveBtn && leafletMapInstance) {
+    const heatMode = leafletMapInstance.activeMapMode === "heat";
+    mapMoveBtn.disabled = heatMode || !mapSelectionBounds;
+    mapMoveBtn.title = heatMode
+      ? "Switch to Points mode to move the map region."
+      : !mapSelectionBounds
+        ? "Draw a region on the map first."
+        : "Drag inside the blue rectangle to move it without panning the map.";
+    mapMoveBtn.setAttribute(
+      "aria-pressed",
+      leafletMapInstance.moveRegionModeActive ? "true" : "false"
+    );
+    mapMoveBtn.classList.toggle(
+      "map-toolbar-btn-primary",
+      Boolean(leafletMapInstance.moveRegionModeActive)
+    );
+    mapMoveBtn.textContent = leafletMapInstance.moveRegionModeActive
+      ? "Moving..."
+      : "Move region";
   }
 
   renderFilterChips();
@@ -504,7 +664,127 @@ function updateStatusPanel() {
 }
 
 
-function renderCategoryChart(containerId, records, accessor, limit) {
+const MINI_CHART_TYPE_FALLBACK_COLORS = {
+  PTHOLE: "#e11d48",
+  PLMB_DEF: "#0ea5e9",
+  "MTL-FRN": "#10b981",
+  SEWAG_EX: "#1a1a1a",
+  GRFITI: "#8b5cf6",
+  RCYCLNG: "#eab308",
+  Unknown: "#6b7280"
+};
+
+function getServiceTypeColorForMini(srType) {
+  const key = srType || "Unknown";
+  if (leafletMapInstance && typeof leafletMapInstance.getServiceTypeColor === "function") {
+    return leafletMapInstance.getServiceTypeColor(key);
+  }
+  return MINI_CHART_TYPE_FALLBACK_COLORS[key] || "#64748b";
+}
+
+/** Order [srType, count] pairs: target types first (stable), then any other types by count. */
+function orderMiniChartServiceTypeSegments(entries) {
+  const map = new Map(entries);
+  const out = [];
+  for (const t of TARGET_SERVICE_TYPES) {
+    const c = map.get(t);
+    if (c > 0) out.push([t, c]);
+  }
+  const extras = [...map.entries()]
+    .filter(([t]) => !TARGET_SERVICE_TYPES.includes(t))
+    .sort((a, b) => b[1] - a[1]);
+  return out.concat(extras);
+}
+
+/** Stable priority order for stacked mini-bar segments */
+function orderMiniChartPrioritySegments(entries) {
+  const rank = k => {
+    const u = String(k || "Unknown").trim().toUpperCase();
+    if (u === "HAZARDOUS") return 0;
+    if (u === "PRIORITY") return 1;
+    if (u === "STANDARD") return 2;
+    if (u === "LOW") return 3;
+    return 4;
+  };
+  return [...entries].sort((a, b) => rank(a[0]) - rank(b[0]) || b[1] - a[1]);
+}
+
+function getPrioritySegmentColor(p) {
+  const u = String(p || "Unknown").trim().toUpperCase();
+  if (u === "HAZARDOUS") return "#dc2626";
+  if (u === "PRIORITY") return "#d97706";
+  if (u === "STANDARD") return "#2563eb";
+  if (u === "LOW") return "#64748b";
+  return "#94a3b8";
+}
+
+function orderMiniChartSegments(entries, innerField) {
+  if (innerField === "srType") return orderMiniChartServiceTypeSegments(entries);
+  if (innerField === "priority") return orderMiniChartPrioritySegments(entries);
+  return [...entries].sort((a, b) => b[1] - a[1]);
+}
+
+function innerAccessorForField(innerField) {
+  if (innerField === "deptName") return d => d.deptName || "Unknown";
+  if (innerField === "priority") return d => d.priority || "Unknown";
+  if (innerField === "neighborhood") return d => d.neighborhood || "Unknown";
+  return d => d.srType || "Unknown";
+}
+
+/**
+ * Pick a segment fill that matches the map legend whenever the inner
+ * dimension equals the map's current "Color points by" mode.
+ */
+function segmentColor(innerField, key) {
+  if (innerField === "srType") return getServiceTypeColorForMini(key);
+  if (innerField === "priority") return getPrioritySegmentColor(key);
+
+  if (
+    leafletMapInstance &&
+    typeof leafletMapInstance.colorScale === "function" &&
+    leafletMapInstance.colorMode === innerField
+  ) {
+    return leafletMapInstance.colorScale(key || "Unknown");
+  }
+
+  return "#94a3b8";
+}
+
+function segmentTitlePrefix(innerField) {
+  if (innerField === "deptName") return "Dept";
+  if (innerField === "priority") return "Priority";
+  if (innerField === "neighborhood") return "Area";
+  return "Type";
+}
+
+/** Map “Color points by” → inner mini-bar dimension (for methods / depts / priority charts). */
+function innerFieldFromMapColorMode(colorMode) {
+  if (colorMode === "daysToUpdate") return "srType";
+  if (colorMode === "neighborhood") return "neighborhood";
+  if (colorMode === "deptName") return "deptName";
+  if (colorMode === "priority") return "priority";
+  return "srType";
+}
+
+function getMapColorModeForMiniBars() {
+  if (leafletMapInstance && leafletMapInstance.colorMode) {
+    return leafletMapInstance.colorMode;
+  }
+  const el = document.getElementById("color-mode");
+  return el && el.value ? el.value : "srType";
+}
+
+/** When row label is the same dimension as the inner breakdown, bars would be a single block — use service type instead. */
+function effectiveInnerFieldForRowAxis(rowAxis, innerFromMap) {
+  if (rowAxis === "deptName" && innerFromMap === "deptName") return "srType";
+  if (rowAxis === "priority" && innerFromMap === "priority") return "srType";
+  return innerFromMap;
+}
+
+/**
+ * @param {string} innerField - "srType" | "deptName" | "priority" — dimension shown inside each bar
+ */
+function renderCategoryChart(containerId, records, accessor, limit, clickFilterField, innerField = "srType") {
   const container = d3.select(containerId);
   container.html("");
 
@@ -517,22 +797,84 @@ function renderCategoryChart(containerId, records, accessor, limit) {
     return;
   }
 
+  const innerAcc = innerAccessorForField(innerField);
+  const byCategory = d3.rollup(
+    records,
+    v => d3.rollups(v, vv => vv.length, innerAcc),
+    d => accessor(d) || "Unknown"
+  );
+
+  const titlePrefix = segmentTitlePrefix(innerField);
+
   const maxCount = rows[0][1] || 1;
   rows.forEach(([label, count]) => {
     const row = container.append("div").attr("class", "mini-row");
+    if (clickFilterField === "neighborhood" && filterNeighborhoods.includes(label)) {
+      row.classed("mini-row--active", true);
+    }
+    if (clickFilterField && typeof window.onLevel3Filter === "function") {
+      row
+        .style("cursor", "pointer")
+        .attr("title", "Click to add or remove this value from filters")
+        .on("click", () => window.onLevel3Filter(clickFilterField, label));
+    }
     row.append("div").attr("class", "mini-label").text(label);
     const barWrap = row.append("div").attr("class", "mini-bar-wrap");
-    barWrap.append("div")
-      .attr("class", "mini-bar")
+    const outer = barWrap.append("div")
+      .attr("class", "mini-bar-outer")
       .style("width", `${(count / maxCount) * 100}%`);
+    const segWrap = outer.append("div").attr("class", "mini-bar-segments");
+    const segments = orderMiniChartSegments(byCategory.get(label) || [], innerField);
+    let allocated = 0;
+    segments.forEach(([segKey, c], i) => {
+      const isLast = i === segments.length - 1;
+      const pctNum = count && isLast
+        ? Math.max(0, 100 - allocated)
+        : count
+          ? (c / count) * 100
+          : 0;
+      if (!isLast) allocated += pctNum;
+      const pctDisp = count ? ((c / count) * 100).toFixed(1) : "0";
+      segWrap.append("div")
+        .attr("class", "mini-seg")
+        .style("width", `${pctNum}%`)
+        .style("background-color", segmentColor(innerField, segKey))
+        .attr("title", `${titlePrefix} ${segKey}: ${formatCount(c)} (${pctDisp}% of row)`);
+    });
     row.append("div").attr("class", "mini-value").text(formatCount(count));
   });
 }
 
 function updateSummaryCharts() {
-  renderCategoryChart("#methods-chart", filteredRecords, d => d.methodReceived, 7);
-  renderCategoryChart("#depts-chart",   filteredRecords, d => d.deptName,       7);
-  renderCategoryChart("#priority-chart",filteredRecords, d => d.priority,       null);
+  const innerLinked = innerFieldFromMapColorMode(getMapColorModeForMiniBars());
+
+  // Top neighborhoods: inner mix always by service type (row label is already neighborhood).
+  renderCategoryChart("#neighborhood-chart", filteredRecords, d => d.neighborhood, 12, "neighborhood", "srType");
+  // Inner mix follows Map → Color points by (Time mode still maps to service type above).
+  renderCategoryChart(
+    "#methods-chart",
+    filteredRecords,
+    d => d.methodReceived,
+    7,
+    null,
+    effectiveInnerFieldForRowAxis("methodReceived", innerLinked)
+  );
+  renderCategoryChart(
+    "#depts-chart",
+    filteredRecords,
+    d => d.deptName,
+    7,
+    null,
+    effectiveInnerFieldForRowAxis("deptName", innerLinked)
+  );
+  renderCategoryChart(
+    "#priority-chart",
+    filteredRecords,
+    d => d.priority,
+    null,
+    null,
+    effectiveInnerFieldForRowAxis("priority", innerLinked)
+  );
 }
 
 
@@ -606,6 +948,15 @@ function populateTimelineYearSelect() {
     el.appendChild(opt);
   }
   if (current && [...el.options].some(o => o.value === current)) el.value = current;
+}
+
+function applyDefaultTimelineYearSelection() {
+  const el = document.getElementById("timeline-year");
+  if (!el) return;
+  const preferred = String(DEFAULT_TIMELINE_YEAR);
+  if ([...el.options].some(o => o.value === preferred)) {
+    el.value = preferred;
+  }
 }
 
 function handleBrush(event) {
@@ -695,7 +1046,7 @@ function renderTimeline(records) {
     .append("svg")
     .attr("viewBox", `0 0 ${width} ${height}`)
     .attr("width",  "100%")
-    .attr("height", "auto")
+    .attr("height", height)
     .attr("font-family", '"IBM Plex Sans", system-ui, sans-serif');
 
   const xDomainStart = series[0].periodStart;
@@ -831,12 +1182,7 @@ function applyFilters() {
   updateStatusPanel();
 
   if (typeof window.updateLevel3Charts === "function") {
-    window.updateLevel3Charts(filteredRecords, {
-      neighborhood: filterNeighborhoods[0] || "",
-      method:       filterMethodReceived,
-      dept:         filterDepartment,
-      priority:     filterPriority
-    });
+    window.updateLevel3Charts(filteredRecords, getLevel3ActiveFilters());
   }
 }
 
@@ -866,6 +1212,16 @@ window.onLevel3Filter = function (field, value) {
     filterPriority = filterPriority === value ? "" : value;
     const prioEl = document.getElementById("filter-priority");
     if (prioEl) prioEl.value = filterPriority;
+
+  } else if (field === "serviceType") {
+    const idx = filterServiceTypes.indexOf(value);
+    if (idx === -1) {
+      filterServiceTypes.push(value);
+    } else {
+      filterServiceTypes.splice(idx, 1);
+    }
+    populateServiceTypesDropdown();
+    updateServiceTypesButtonText();
   }
 
   applyFilters();
@@ -896,6 +1252,7 @@ function wireUiEvents() {
 
   colorModeSelect.addEventListener("change", event => {
     if (leafletMapInstance) leafletMapInstance.setColorMode(event.target.value);
+    updateSummaryCharts();
   });
 
   const serviceTypesToggle = document.getElementById("service-types-toggle");
@@ -947,11 +1304,15 @@ function wireUiEvents() {
     mapDrawRegionBtn.addEventListener("click", () => {
       if (!leafletMapInstance) return;
       if (leafletMapInstance.activeMapMode !== "points") return;
+      if (leafletMapInstance.moveRegionModeActive) {
+        leafletMapInstance.setMoveRegionMode(false);
+      }
       if (leafletMapInstance.brushModeActive) {
         leafletMapInstance.cancelBrushMode();
       } else {
         leafletMapInstance.setBrushMode(true);
       }
+      updateStatusPanel();
     });
   }
 
@@ -963,9 +1324,25 @@ function wireUiEvents() {
     });
   }
 
+  const mapMoveRegionBtn = document.getElementById("map-move-region");
+  if (mapMoveRegionBtn && leafletMapInstance) {
+    mapMoveRegionBtn.addEventListener("click", () => {
+      if (!leafletMapInstance || !leafletMapInstance.selectionRect) return;
+      if (leafletMapInstance.activeMapMode !== "points") return;
+      leafletMapInstance.setMoveRegionMode(!leafletMapInstance.moveRegionModeActive);
+      updateStatusPanel();
+    });
+  }
+
   document.addEventListener("keydown", event => {
     if (event.key !== "Escape") return;
-    if (!leafletMapInstance || !leafletMapInstance.brushModeActive) return;
+    if (!leafletMapInstance) return;
+    if (leafletMapInstance.moveRegionModeActive) {
+      leafletMapInstance.setMoveRegionMode(false);
+      updateStatusPanel();
+      return;
+    }
+    if (!leafletMapInstance.brushModeActive) return;
     leafletMapInstance.cancelBrushMode();
   });
 
@@ -1020,7 +1397,7 @@ function wireUiEvents() {
       filterDepartment    = "";
       filterNeighborhoods = [];
       filterPriority = "";
-      filterServiceTypes = [...TARGET_SERVICE_TYPES];
+      filterServiceTypes = ["PTHOLE"];
       if (filterDept) filterDept.value = "";
       if (filterPriorityEl) filterPriorityEl.value = "";
       populateNeighborhoodDropdown();
@@ -1093,17 +1470,18 @@ async function initializeApp() {
 
   allRecords      = dataset.records.slice();
   filteredRecords = allRecords.slice();
-  // Initialize with predefined service types selected
-  filterServiceTypes = [...TARGET_SERVICE_TYPES];
+  filterServiceTypes = ["PTHOLE"];
 
   leafletMapInstance = new LeafletMap(
     {
       parentElement:    "#my-map",
       tooltipElement:   "#tooltip",
       legendElement:    "#legend",
-      initialColorMode: "daysToUpdate",
+      initialColorMode: "srType",
       initialBasemap:   "street",
       initialMapMode:   "points",
+      targetServiceTypes: TARGET_SERVICE_TYPES,
+      initialServiceTypeColors: loadServiceTypeColorsFromStorage(),
       onMapSelectionChange(bounds) {
         mapSelectionBounds = bounds;
         applyFilters();
@@ -1114,6 +1492,9 @@ async function initializeApp() {
     },
     filteredRecords
   );
+
+  const colorModeEl = document.getElementById("color-mode");
+  if (colorModeEl) colorModeEl.value = leafletMapInstance.colorMode;
 
   if (!leafletMapInstance.heatLayer) {
     const heatWarning = "Heatmap plugin failed to load; points mode only.";
@@ -1126,9 +1507,9 @@ async function initializeApp() {
   populateServiceTypesDropdown();
   updateServiceTypesButtonText();
   populateTimelineYearSelect();
+  applyDefaultTimelineYearSelection();
+  applyFilters();
   renderTimeline(allRecords);
-  updateSummaryCharts();
-  updateStatusPanel();
   wireUiEvents();
 
   const basemapLabel = document.getElementById("basemap-label");
@@ -1137,10 +1518,6 @@ async function initializeApp() {
     const street = leafletMapInstance.activeBasemap === "street";
     basemapLabel.textContent = street ? "Street (OSM)" : "OpenCycleMap";
     basemapBtn.textContent   = street ? "OpenCycleMap" : "Street map";
-  }
-
-  if (typeof window.updateLevel3Charts === "function") {
-    window.updateLevel3Charts(filteredRecords, {});
   }
 }
 

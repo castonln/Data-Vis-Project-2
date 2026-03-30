@@ -1,3 +1,15 @@
+function defaultServiceTypeColorEntries() {
+  return [
+    ["PTHOLE",   "#e11d48"],
+    ["PLMB_DEF", "#0ea5e9"],
+    ["MTL-FRN",  "#10b981"],
+    ["SEWAG_EX", "#1a1a1a"],
+    ["GRFITI",   "#8b5cf6"],
+    ["RCYCLNG",  "#eab308"],
+    ["Unknown",  "#6b7280"]
+  ];
+}
+
 class LeafletMap {
   constructor(_config, _data) {
     this.config = {
@@ -7,17 +19,25 @@ class LeafletMap {
       initialColorMode: _config.initialColorMode || "daysToUpdate",
       initialBasemap: _config.initialBasemap || "street",
       initialMapMode: _config.initialMapMode || "points",
+      targetServiceTypes: Array.isArray(_config.targetServiceTypes) ? _config.targetServiceTypes : [],
       onMapSelectionChange:
         typeof _config.onMapSelectionChange === "function" ? _config.onMapSelectionChange : () => {},
       onBrushSessionEnd:
         typeof _config.onBrushSessionEnd === "function" ? _config.onBrushSessionEnd : () => {}
     };
 
+    this._initServiceTypeColors(_config.initialServiceTypeColors);
+
     this.brushModeActive = false;
     this.selectionRect = null;
     this._brushStartLatLng = null;
     this._previewRect = null;
     this._brushDocHandlers = null;
+
+    this.moveRegionModeActive = false;
+    this._moveStartLatLng = null;
+    this._moveInitialBounds = null;
+    this._moveRegionDocHandlers = null;
 
     this.data = _data || [];
     this.filteredData = this.data.slice();
@@ -33,6 +53,37 @@ class LeafletMap {
     this.legendContainer = d3.select(this.config.legendElement);
 
     this.initVis();
+  }
+
+  _initServiceTypeColors(overrides) {
+    this.serviceTypeColors = new Map(defaultServiceTypeColorEntries());
+    if (overrides && typeof overrides === "object") {
+      for (const [k, v] of Object.entries(overrides)) {
+        if (typeof v === "string" && /^#[0-9A-Fa-f]{6}$/.test(v)) {
+          this.serviceTypeColors.set(k, v.toLowerCase());
+        }
+      }
+    }
+  }
+
+  getServiceTypeColor(srType) {
+    const key = srType || "Unknown";
+    return this.serviceTypeColors.get(key) || "#64748b";
+  }
+
+  getServiceTypeColorsObject() {
+    return Object.fromEntries(this.serviceTypeColors);
+  }
+
+  setServiceTypeColor(srType, hex) {
+    if (!srType || !this.serviceTypeColors.has(srType)) return;
+    const h = String(hex).trim();
+    if (!/^#[0-9A-Fa-f]{6}$/.test(h)) return;
+    this.serviceTypeColors.set(srType, h.toLowerCase());
+    if (this.colorMode === "srType" || this.colorMode === "daysToUpdate") {
+      this.updateColors();
+      this.renderLegend();
+    }
   }
 
   initVis() {
@@ -88,6 +139,7 @@ class LeafletMap {
 
     vis.overlay = d3.select(vis.theMap.getPanes().overlayPane);
     vis.svg = vis.overlay.select("svg");
+    vis.pointLayer = vis.svg.append("g").attr("class", "map-points-layer");
     vis.setSvgPointerEventsForInteraction();
 
     // Keep the heat surface below the SVG overlay so interaction targets stay available.
@@ -127,6 +179,7 @@ class LeafletMap {
     }
 
     vis._installMapBrush();
+    vis._installRegionMoveDrag();
   }
 
   _getMapContainerEl() {
@@ -173,6 +226,7 @@ class LeafletMap {
       this.cancelBrushMode();
       return;
     }
+    this.setMoveRegionMode(false);
     this.brushModeActive = true;
     this._setBrushCursor(true);
     this.setSvgPointerEventsForInteraction();
@@ -192,8 +246,37 @@ class LeafletMap {
     this.config.onMapSelectionChange(bounds);
   }
 
+  _cancelMoveRegionDrag() {
+    if (this._moveRegionDocHandlers) {
+      document.removeEventListener("mousemove", this._moveRegionDocHandlers.move);
+      document.removeEventListener("mouseup", this._moveRegionDocHandlers.up);
+      this._moveRegionDocHandlers = null;
+    }
+    if (this.theMap) this.theMap.dragging.enable();
+    this._moveStartLatLng = null;
+    this._moveInitialBounds = null;
+  }
+
+  setMoveRegionMode(enabled) {
+    if (!enabled) {
+      this._cancelMoveRegionDrag();
+      this.moveRegionModeActive = false;
+      const elOff = this._getMapContainerEl();
+      if (elOff) elOff.classList.remove("map-move-region-mode");
+      this.config.onBrushSessionEnd();
+      return;
+    }
+    if (this.activeMapMode !== "points" || !this.selectionRect) return;
+    this.cancelBrushMode();
+    this.moveRegionModeActive = true;
+    const elOn = this._getMapContainerEl();
+    if (elOn) elOn.classList.add("map-move-region-mode");
+    this.config.onBrushSessionEnd();
+  }
+
   clearSpatialSelection() {
     this.cancelBrushMode();
+    this.setMoveRegionMode(false);
     if (this.selectionRect) {
       this.theMap.removeLayer(this.selectionRect);
       this.selectionRect = null;
@@ -261,6 +344,57 @@ class LeafletMap {
       document.addEventListener("mousemove", onMove);
       document.addEventListener("mouseup", onUp);
     };
+    container.addEventListener("mousedown", onDown, true);
+  }
+
+  _installRegionMoveDrag() {
+    const vis = this;
+    const map = vis.theMap;
+    const container = map.getContainer();
+
+    const onDown = e => {
+      if (!vis.moveRegionModeActive || e.button !== 0) return;
+      if (!vis.selectionRect) return;
+      const ll = map.mouseEventToLatLng(e);
+      const b = vis.selectionRect.getBounds();
+      if (!b.contains(ll)) return;
+      L.DomEvent.preventDefault(e);
+      L.DomEvent.stop(e);
+      map.dragging.disable();
+      vis._moveStartLatLng = ll;
+      vis._moveInitialBounds = L.latLngBounds(b.getSouthWest(), b.getNorthEast());
+
+      const onMove = moveEv => {
+        if (!vis._moveStartLatLng || !vis._moveInitialBounds || !vis.selectionRect) return;
+        const cur = map.mouseEventToLatLng(moveEv);
+        const dLat = cur.lat - vis._moveStartLatLng.lat;
+        const dLng = cur.lng - vis._moveStartLatLng.lng;
+        const sw = vis._moveInitialBounds.getSouthWest();
+        const ne = vis._moveInitialBounds.getNorthEast();
+        const nb = L.latLngBounds(
+          [sw.lat + dLat, sw.lng + dLng],
+          [ne.lat + dLat, ne.lng + dLng]
+        );
+        vis.selectionRect.setBounds(nb);
+      };
+
+      const onUp = () => {
+        document.removeEventListener("mousemove", onMove);
+        document.removeEventListener("mouseup", onUp);
+        vis._moveRegionDocHandlers = null;
+        map.dragging.enable();
+        vis._moveStartLatLng = null;
+        vis._moveInitialBounds = null;
+        if (vis.selectionRect) {
+          vis.config.onMapSelectionChange(vis.selectionRect.getBounds());
+        }
+      };
+
+      vis._moveRegionDocHandlers = { move: onMove, up: onUp };
+      document.addEventListener("mousemove", onMove);
+      document.addEventListener("mouseup", onUp);
+    };
+
     container.addEventListener("mousedown", onDown, true);
   }
 
@@ -356,6 +490,26 @@ class LeafletMap {
     ])(t), categoryCount);
   }
 
+  /** High-contrast hues for many departments (map “Color by department”). */
+  getDepartmentPalette(categoryCount) {
+    const palette = [
+      "#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd",
+      "#8c564b", "#e377c2", "#17becf", "#bcbd22", "#393b79",
+      "#637939", "#843c39", "#7b4173", "#5254a3", "#8ca252",
+      "#bd9e39", "#ad494a", "#a55194", "#6b6ecf", "#e7969c",
+      "#7f7f7f", "#aec7e8", "#ffbb78", "#98df8a", "#ff9896"
+    ];
+
+    if (categoryCount <= palette.length) {
+      return palette.slice(0, categoryCount);
+    }
+
+    return d3.quantize(
+      t => d3.interpolateRgbBasis(palette)(t),
+      categoryCount
+    );
+  }
+
   prepareCategoricalScale(fieldName) {
     const counts = d3.rollup(
       this.mappedData,
@@ -370,7 +524,9 @@ class LeafletMap {
     const categories = this.categoryItems.map(d => d.value);
     const colors = fieldName === "neighborhood"
       ? this.getNeighborhoodPalette(categories.length)
-      : this.getOrdinalPalette(categories.length);
+      : fieldName === "deptName"
+        ? this.getDepartmentPalette(categories.length)
+        : this.getOrdinalPalette(categories.length);
 
     this.colorScale = d3.scaleOrdinal()
       .domain(categories)
@@ -427,23 +583,12 @@ class LeafletMap {
     } else if (mode === "neighborhood") {
       this.prepareCategoricalScale("neighborhood");
     } else if (mode === "srType") {
-      const serviceTypeColors = new Map([
-        ["PTHOLE", "#e11d48"],    // Rose - Potholes
-        ["PLMB_DEF", "#0ea5e9"],  // Sky - Plumbing Defects
-        ["MTL-FRN", "#10b981"],  // Emerald - Metal Furniture
-        ["SEWAG_EX", "#f59e0b"], // Amber - Sewage Exposure
-        ["GRFITI", "#8b5cf6"],   // Violet - Graffiti
-        ["RCYCLNG", "#06b6d4"],  // Cyan - Recycling
-        ["Unknown", "#6b7280"]   // Gray - Unknown
-      ]);
-
       const counts = d3.rollup(
         this.mappedData,
         values => values.length,
         d => d.srType || "Unknown"
       );
 
-      // Only include target service types in the legend
       this.categoryItems = this.config.targetServiceTypes
         .map(type => ({
           value: type,
@@ -453,7 +598,7 @@ class LeafletMap {
 
       this.getColor = d => {
         const key = d.srType || "Unknown";
-        return serviceTypeColors.get(key) || "#64748b";
+        return this.getServiceTypeColor(key);
       };
     } else {
       this.prepareCategoricalScale("deptName");
@@ -533,7 +678,7 @@ class LeafletMap {
   }
 
   updateHeatLayer() {
-    if (!this.heatLayer) return;
+    if (!this.heatLayer || !this.heatLayer._map) return;
 
     let aggregatedPoints = this.aggregateHeatPoints();
     const heatMax = Math.max(1, d3.max(aggregatedPoints, d => d.count) || 1);
@@ -606,7 +751,8 @@ class LeafletMap {
     if (!this.Dots) return;
 
     const appearance = this.getPointAppearance();
-    this.svg.style("display", "block");
+    // Must match setMapMode: heat mode hides the D3 overlay so only the canvas heat layer shows.
+    this.svg.style("display", this.activeMapMode === "points" ? "block" : "none");
     this.Dots
       .style("pointer-events", "all")
       .attr("r", appearance.radius)
@@ -723,10 +869,8 @@ class LeafletMap {
       const defs = legendSvg.append("defs");
       const linearGradient = defs.append("linearGradient")
         .attr("id", gradientId)
-        .attr("x1", "0%")
-        .attr("y1", "0%")
-        .attr("x2", "100%")
-        .attr("y2", "0%");
+        .attr("x1", "0%").attr("y1", "0%")
+        .attr("x2", "100%").attr("y2", "0%");
 
       const { light, dark } = vis.sequentialEndpoints || vis.getSequentialEndpoints();
       const steps = 12;
@@ -738,21 +882,17 @@ class LeafletMap {
       }
 
       legendSvg.append("rect")
-        .attr("x", 0)
-        .attr("y", 8)
-        .attr("width", "100%")
-        .attr("height", 16)
+        .attr("x", 0).attr("y", 8)
+        .attr("width", "100%").attr("height", 16)
         .attr("fill", `url(#${gradientId})`);
 
       legendSvg.append("text")
-        .attr("x", 0)
-        .attr("y", 44)
+        .attr("x", 0).attr("y", 44)
         .attr("class", "legend-text")
         .text(`${d3.format(".1f")(minValue)} days`);
 
       legendSvg.append("text")
-        .attr("x", "100%")
-        .attr("y", 44)
+        .attr("x", "100%").attr("y", 44)
         .attr("class", "legend-text legend-right")
         .text(`${d3.format(".1f")(maxValue)} days`);
 
@@ -819,6 +959,7 @@ class LeafletMap {
 
     if (this.activeMapMode === "heat") {
       this.cancelBrushMode();
+      this.setMoveRegionMode(false);
     }
 
     const showPoints = this.activeMapMode === "points";

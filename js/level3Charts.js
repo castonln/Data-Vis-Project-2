@@ -1,7 +1,8 @@
 const CATEGORICAL_COLORS = [
-  "#4e79a7", "#f28e2b", "#59a14f", "#76b7b2",
-  "#edc948", "#b07aa1", "#ff9da7", "#9c755f",
-  "#bab0ac", "#499894"
+  "#2563eb", "#dc2626", "#16a34a", "#9333ea", "#ea580c",
+  "#0891b2", "#db2777", "#ca8a04", "#4f46e5", "#0d9488",
+  "#c026d3", "#b45309", "#0284c7", "#be123c", "#0369a1",
+  "#7c3aed", "#059669", "#e11d48", "#65a30d"
 ];
 
 const PRIORITY_COLORS = {
@@ -89,7 +90,7 @@ function renderNeighborhoodChart(records, activeValue) {
   const svg = container.append("svg")
     .attr("viewBox", `0 0 ${width} ${height}`)
     .attr("width",  "100%")
-    .attr("height", "auto")
+    .attr("height", height)
     .attr("role",   "img")
     .attr("aria-label", "Top neighbourhoods by number of service requests");
 
@@ -186,6 +187,7 @@ function renderNeighborhoodChart(records, activeValue) {
 
 function renderMethodChart(records, activeValue) {
   const container = d3.select("#method-chart");
+  if (!container.node()) return;
   container.html("");
 
   const rows = rollupByField(records, d => d.methodReceived);
@@ -201,6 +203,7 @@ function renderMethodChart(records, activeValue) {
 
 function renderDepartmentChart(records, activeValue) {
   const container = d3.select("#dept-chart");
+  if (!container.node()) return;
   container.html("");
 
   const rows = rollupByField(records, d => d.deptName);
@@ -221,7 +224,7 @@ function renderDepartmentChart(records, activeValue) {
   const svg = container.append("svg")
     .attr("viewBox", `0 0 ${width} ${height}`)
     .attr("width",  "100%")
-    .attr("height", "auto")
+    .attr("height", height)
     .attr("role",   "img")
     .attr("aria-label", "Service requests by department");
 
@@ -316,6 +319,7 @@ function renderDepartmentChart(records, activeValue) {
 
 function renderPriorityChart(records, activeValue) {
   const container = d3.select("#priority-chart-l3");
+  if (!container.node()) return;
   container.html("");
 
   const rows = rollupByField(records, d => d.priority);
@@ -327,6 +331,137 @@ function renderPriorityChart(records, activeValue) {
     .unknown("#cbd5e1");
 
   renderDonut(container, rows, colorScale, "priority", activeValue);
+}
+
+
+function renderServiceTypeChart(records, activeFilters = {}) {
+  const serviceTypesSelected = activeFilters.serviceTypesSelected || [];
+  const serviceTypeColors    = activeFilters.serviceTypeColors || {};
+  const highlightSubset      = Boolean(activeFilters.serviceTypesOnlySubset);
+
+  const container = d3.select("#service-type-chart");
+  if (!container.node()) return;
+
+  container.html("");
+
+  const descByType = new Map();
+  records.forEach(r => {
+    const k = r.srType || "Unknown";
+    if (!descByType.has(k) && r.srTypeDesc) descByType.set(k, r.srTypeDesc);
+  });
+
+  const rows = rollupByField(records, d => d.srType || "Unknown");
+  if (rows.length === 0) { showEmpty(container); return; }
+
+  const ROW_HEIGHT = 28;
+  const margin     = { top: 10, right: 64, bottom: 36, left: 120 };
+  const width      = Math.max(400, container.node().clientWidth || 520);
+  const innerW     = width - margin.left - margin.right;
+  const innerH     = rows.length * ROW_HEIGHT;
+  const height     = innerH + margin.top + margin.bottom;
+
+  const svg = container.append("svg")
+    .attr("viewBox", `0 0 ${width} ${height}`)
+    .attr("width",  "100%")
+    .attr("height", height)
+    .attr("role",   "img")
+    .attr("aria-label", "Service requests by service type code");
+
+  const g = svg.append("g")
+    .attr("transform", `translate(${margin.left},${margin.top})`);
+
+  const maxCount = rows[0][1] || 1;
+  const xScale = d3.scaleLinear().domain([0, maxCount]).range([0, innerW]).nice();
+  const yScale = d3.scaleBand()
+    .domain(rows.map(d => d[0]))
+    .range([0, innerH])
+    .padding(0.18);
+
+  g.append("g").attr("class", "grid-lines")
+    .selectAll("line")
+    .data(xScale.ticks(5))
+    .join("line")
+      .attr("x1", d => xScale(d)).attr("x2", d => xScale(d))
+      .attr("y1", 0).attr("y2", innerH)
+      .attr("stroke", "var(--border)").attr("stroke-width", 1);
+
+  g.selectAll(".st-bar")
+    .data(rows)
+    .join("rect")
+      .attr("class",  "st-bar chart-bar")
+      .attr("x",      0)
+      .attr("y",      d => yScale(d[0]))
+      .attr("height", yScale.bandwidth())
+      .attr("width",  d => xScale(d[1]))
+      .attr("fill",   d => serviceTypeColors[d[0]] || "#6366f1")
+      .attr("stroke", d =>
+        highlightSubset && serviceTypesSelected.includes(d[0]) ? "#d97706" : "none"
+      )
+      .attr("stroke-width", d =>
+        highlightSubset && serviceTypesSelected.includes(d[0]) ? 3 : 0
+      )
+      .attr("rx", 3)
+      .style("cursor", "pointer")
+      .on("click",      (_e, d) => emitFilter("serviceType", d[0]))
+      .on("mouseover",  function (e, d) {
+        d3.select(this).attr("opacity", 0.88);
+        const pct = ((d[1] / d3.sum(rows, r => r[1])) * 100).toFixed(1);
+        const desc = descByType.get(d[0]) || "";
+        const descLine = desc ? `<br><span style="opacity:0.88;font-size:0.92em">${desc}</span>` : "";
+        showL3Tooltip(e,
+          `<strong>${d[0]}</strong>${descLine}<br>${l3FormatCount(d[1])} requests (${pct}%)`
+        );
+      })
+      .on("mousemove",  (e, d) => {
+        const pct = ((d[1] / d3.sum(rows, r => r[1])) * 100).toFixed(1);
+        const desc = descByType.get(d[0]) || "";
+        const descLine = desc ? `<br><span style="opacity:0.88;font-size:0.92em">${desc}</span>` : "";
+        showL3Tooltip(e,
+          `<strong>${d[0]}</strong>${descLine}<br>${l3FormatCount(d[1])} requests (${pct}%)`
+        );
+      })
+      .on("mouseleave", function () {
+        d3.select(this).attr("opacity", 1);
+        hideL3Tooltip();
+      });
+
+  g.selectAll(".st-label")
+    .data(rows)
+    .join("text")
+      .attr("class", "st-label chart-count-label")
+      .attr("x",  d => xScale(d[1]) + 4)
+      .attr("y",  d => yScale(d[0]) + yScale.bandwidth() / 2)
+      .attr("dy", "0.35em")
+      .attr("font-size", 11)
+      .attr("fill", "var(--muted-foreground)")
+      .text(d => l3FormatCount(d[1]));
+
+  g.append("g")
+    .attr("class", "axis y-axis")
+    .call(d3.axisLeft(yScale).tickSize(0).tickPadding(6))
+    .call(ax => ax.select(".domain").remove())
+    .selectAll("text")
+      .attr("font-size", 12)
+      .attr("fill", "var(--foreground)")
+      .style("cursor", "pointer")
+      .on("click", (_e, d) => emitFilter("serviceType", d));
+
+  g.append("g")
+    .attr("class", "axis x-axis")
+    .attr("transform", `translate(0,${innerH})`)
+    .call(d3.axisBottom(xScale).ticks(5).tickFormat(d3.format(",d")))
+    .call(ax => ax.select(".domain").remove())
+    .selectAll("text")
+      .attr("font-size", 11)
+      .attr("fill", "var(--muted-foreground)");
+
+  svg.append("text")
+    .attr("x", margin.left + innerW / 2)
+    .attr("y", height - 4)
+    .attr("text-anchor", "middle")
+    .attr("font-size", 11)
+    .attr("fill", "var(--muted-foreground)")
+    .text("Number of requests (click a bar to toggle type in the map filter)");
 }
 
 
@@ -345,7 +480,7 @@ function renderDonut(container, rows, colorScale, filterField, activeValue) {
   const svg = container.append("svg")
     .attr("viewBox", `0 0 ${width} ${totalH}`)
     .attr("width",  "100%")
-    .attr("height", "auto")
+    .attr("height", totalH)
     .attr("role",   "img")
     .attr("aria-label", "Donut chart");
 
@@ -429,7 +564,7 @@ function renderDonut(container, rows, colorScale, filterField, activeValue) {
 
 
 function updateLevel3Charts(records, activeFilters = {}) {
-  renderNeighborhoodChart(records, activeFilters.neighborhood || "");
+  renderServiceTypeChart(records, activeFilters);
   renderMethodChart(records,       activeFilters.method       || "");
   renderDepartmentChart(records,   activeFilters.dept         || "");
   renderPriorityChart(records,     activeFilters.priority     || "");
